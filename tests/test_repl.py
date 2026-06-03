@@ -72,6 +72,26 @@ def test_show_out_of_range_is_safe():
     assert s is not None  # didn't exit
 
 
+def test_show_valid_index_returns_unchanged_state(capsys):
+    """`/show 1` on a valid index must NOT mutate state (only print)."""
+    chunks = [
+        RetrievedChunk(
+            rank=1, document_id="d", document_name="report.pdf",
+            content="MARKER_TEXT_FOR_SHOW", similarity=0.9,
+            vector_similarity=0.9, term_similarity=0.9,
+        ),
+    ]
+    s_in = _state(last_chunks=chunks, top_k=7, kb="finance")
+    s_out = _handle_command("/show 1", s_in)
+    # State is unchanged — /show is a query, not a mutation.
+    assert s_out.kb == "finance"
+    assert s_out.top_k == 7
+    assert s_out.last_chunks == chunks
+    # The output went somewhere — content is printed via rich (captured via capsys).
+    captured = capsys.readouterr()
+    assert "MARKER_TEXT_FOR_SHOW" in captured.out or "MARKER_TEXT_FOR_SHOW" in captured.err
+
+
 def test_unknown_command_returns_unchanged_state():
     """Unknown /commands print help — they don't exit or mutate state."""
     original = _state(kb="finance", top_k=7)

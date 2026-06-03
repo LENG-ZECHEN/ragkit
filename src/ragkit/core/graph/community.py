@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections import defaultdict
 
 import community as community_louvain  # python-louvain package
-import networkx as nx
 
 from ragkit.core.graph.store import NetworkXGraphStore
 from ragkit.core.graph.types import Community

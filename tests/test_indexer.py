@@ -126,3 +126,46 @@ def test_index_file_aborts_when_many_embeddings_fail(sample_txt, fake_openai, fa
 
     with pytest.raises(RuntimeError, match="Embedding failed"):
         index_file(sample_txt, kb_name="kb")
+
+
+def test_index_file_build_graph_invokes_graph_builder(tmp_path, sample_txt, fake_openai, fake_es, monkeypatch):
+    """`--build-graph` (build_graph=True) must call the graph builder with
+    the indexed chunks AND surface entity/relation counts in the result."""
+    from ragkit.core.graph.store import NetworkXGraphStore
+    from ragkit.core.graph.types import Entity, Relation
+
+    captured: dict = {}
+
+    def fake_build_graph(chunks, kb_name, **kw):
+        captured["n_chunks"] = len(list(chunks))
+        captured["kb"] = kb_name
+        store = NetworkXGraphStore(path=tmp_path / "fake_graph.json")
+        store.upsert_entity(Entity(name="x", type="t"))
+        store.upsert_entity(Entity(name="y", type="t"))
+        store.upsert_relation(Relation(source="x", target="y"))
+        return store
+
+    monkeypatch.setattr("ragkit.core.graph.builder.build_graph", fake_build_graph)
+
+    result = index_file(sample_txt, kb_name="kb", build_graph=True)
+
+    assert captured["kb"] == "kb"
+    assert captured["n_chunks"] >= 1
+    assert result["graph_entities"] == 2
+    assert result["graph_relations"] == 1
+
+
+def test_index_file_no_graph_path_does_not_import_graph_builder(sample_txt, fake_openai, fake_es, monkeypatch):
+    """When build_graph=False, the graph builder must NOT be invoked even
+    once — this matters for performance + dependency isolation."""
+    trip_wire = {"called": False}
+
+    def trap(*args, **kwargs):
+        trip_wire["called"] = True
+        raise AssertionError("build_graph must not be called when build_graph=False")
+
+    monkeypatch.setattr("ragkit.core.graph.builder.build_graph", trap)
+
+    result = index_file(sample_txt, kb_name="kb", build_graph=False)
+    assert trip_wire["called"] is False
+    assert "graph_entities" not in result

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -55,7 +54,8 @@ def _handle_command(line: str, state: ReplState) -> ReplState | None:
         return state
 
     if cmd == "/clear":
-        os.system("clear" if os.name != "nt" else "cls")
+        # rich's clear() is cross-platform and avoids spawning a shell.
+        console.clear()
         return state
 
     if cmd == "/kb":

@@ -100,17 +100,25 @@ def retrieve_local(
             collected.setdefault(nb.name, nb)
 
     # Build hits: render each entity + its outgoing edges as one passage.
+    # Cap edges per entity to keep prompts short.
+    MAX_EDGES_PER_ENTITY = 5
     hits: list[GraphHit] = []
     relations = list(store.all_relations())
     for i, entity in enumerate(collected.values(), start=1):
-        rel_lines = []
+        rel_lines: list[str] = []
         for r in relations:
             if r.source == entity.name or r.target == entity.name:
                 other = r.target if r.source == entity.name else r.source
                 rel_lines.append(f"{entity.name} ↔ {other}: {r.description}")
-        content = entity.description
+        # Assemble content from non-empty parts only — avoids stray leading "\n"
+        # when description is empty (common for stub entities auto-created on
+        # dangling edges).
+        parts: list[str] = []
+        if entity.description:
+            parts.append(entity.description)
         if rel_lines:
-            content += "\n关系：\n" + "\n".join(rel_lines[:5])  # cap to keep prompts short
+            parts.append("关系：\n" + "\n".join(rel_lines[:MAX_EDGES_PER_ENTITY]))
+        content = "\n".join(parts)
         hits.append(GraphHit(
             rank=i,
             kind="entity",

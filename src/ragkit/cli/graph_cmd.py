@@ -7,6 +7,7 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeEl
 from rich.table import Table
 
 from ragkit.cli.ui import console, error, info, kv_table, success, warn
+from ragkit.logger import logger
 
 
 def cmd_graph_build(
@@ -60,7 +61,6 @@ def cmd_graph_build(
                 # Leave a breadcrumb — leaking a scroll cursor isn't fatal
                 # (ES TTL cleans up) but a real connection problem here is
                 # useful diagnostic info.
-                from ragkit.logger import logger
                 logger.debug(f"clear_scroll failed: {e}")
 
     if not chunks:

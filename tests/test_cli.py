@@ -77,8 +77,8 @@ def test_ask_invokes_retrieve_and_generate(fake_openai, fake_es, monkeypatch):
             )
         ]
 
-    monkeypatch.setattr("ragkit.cli.commands.retrieve" if False else "ragkit.core.retriever.retrieve", fake_retrieve)
-    # Import path in commands.py uses local import.
+    # commands.py imports `retrieve` lazily inside cmd_ask, so the rebound
+    # attribute on the source module is what matters.
     monkeypatch.setattr("ragkit.core.retriever.retrieve", fake_retrieve)
 
     fake_openai.chat_script = [("content", "Beta answer.")]

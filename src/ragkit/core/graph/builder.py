@@ -52,7 +52,6 @@ def build_graph(
             progress_cb("extracting", i, total)
         text = chunk.get("content_with_weight", "")
         chunk_id = str(chunk.get("id", f"chunk-{i}"))
-        before = store.entity_count()
         result = extract_from_text(text, chunk_id)
         for entity in result.entities:
             store.upsert_entity(entity)
