@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtualenvs
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+
+# Project specific
+.env
+storage/uploads/
+storage/parsed/
+storage/model_cache/
+*.log
+
+# Large model files (auto-downloaded from HuggingFace on first run)
+*.onnx
+*.xgb_model
+src/ragkit/core/rag/res/deepdoc/*.onnx
+src/ragkit/core/rag/res/deepdoc/updown_concat_xgb.model
+
+# Tokenizer trie cache (rebuilt from huqie.txt on first run)
+*.txt.trie
+
+# Test artifacts
+tests/_artifacts/
+
+# Pip
+pip-log.txt
+pip-delete-this-directory.txt
