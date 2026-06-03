@@ -47,11 +47,20 @@ def index_file(
     path: Path,
     kb_name: str,
     *,
+    build_graph: bool = False,
     progress_cb: Callable[[str, float], None] | None = None,
 ) -> dict:
     """Index a single file into the named knowledge base.
 
-    Returns a summary dict: {file, chunks, kb}.
+    Args:
+        path: file to index.
+        kb_name: target knowledge base.
+        build_graph: if True, also extract entities/relations and add to the
+            graph for `kb_name`. Slow (one LLM call per chunk) — opt in.
+        progress_cb: callable(stage, progress 0..1) for UI updates.
+
+    Returns:
+        Summary dict with file/chunks/kb plus graph stats if built.
     """
     cfg = get_config()
     cfg.require_api_key()
@@ -66,7 +75,7 @@ def index_file(
         return {"file": path.name, "chunks": 0, "kb": kb_name}
 
     if progress_cb:
-        progress_cb("embedding", 0.5)
+        progress_cb("embedding", 0.4)
 
     texts = [c["content_with_weight"] for c in chunks]
     vectors = embed_batch(texts)
@@ -75,6 +84,19 @@ def index_file(
             f"Embedding count mismatch: got {len(vectors)} vectors for {len(chunks)} chunks"
         )
 
+    # Per-chunk failures show up as None in the vectors list. Tolerate a few,
+    # but refuse to silently index a half-vectorized file (users wouldn't know
+    # which chunks went missing).
+    none_count = sum(1 for v in vectors if v is None)
+    if none_count:
+        ratio = none_count / len(vectors)
+        if ratio > 0.1:
+            raise RuntimeError(
+                f"Embedding failed for {none_count}/{len(vectors)} chunks ({ratio:.0%}). "
+                "Aborting to avoid a partial index. Check API key / quota."
+            )
+        logger.warning(f"Embedding skipped {none_count}/{len(vectors)} chunks (below 10% threshold)")
+
     docs = [
         _build_doc(c, kb_name, path.name, v)
         for c, v in zip(chunks, vectors)
@@ -82,7 +104,7 @@ def index_file(
     ]
 
     if progress_cb:
-        progress_cb("indexing", 0.9)
+        progress_cb("indexing", 0.7)
 
     es = ESConnection()
     es.ensure_index(kb_name)
@@ -91,7 +113,25 @@ def index_file(
         logger.error(f"ES insertion errors: {errors}")
         raise RuntimeError(f"Failed to index {path.name}: {errors[:3]}")
 
+    result = {"file": path.name, "chunks": len(docs), "kb": kb_name}
+
+    if build_graph:
+        if progress_cb:
+            progress_cb("graph_extract", 0.85)
+        # Import here so the vector-only path doesn't pay the import cost.
+        from ragkit.core.graph.builder import build_graph as build_kb_graph
+
+        # Pass enriched chunks (with id) to the graph builder so source-chunk
+        # tracking links back to ES.
+        enriched = [
+            {"id": d["id"], "content_with_weight": d["content_with_weight"]}
+            for d in docs
+        ]
+        store = build_kb_graph(enriched, kb_name=kb_name, summarize=True)
+        result["graph_entities"] = store.entity_count()
+        result["graph_relations"] = store.relation_count()
+
     if progress_cb:
         progress_cb("done", 1.0)
 
-    return {"file": path.name, "chunks": len(docs), "kb": kb_name}
+    return result

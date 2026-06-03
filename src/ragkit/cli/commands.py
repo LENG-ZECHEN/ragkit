@@ -17,6 +17,11 @@ def cmd_index(
     path: Path = typer.Argument(..., exists=True, help="File or directory to index."),
     kb: str = typer.Option("default", "--kb", "-k", help="Knowledge base name."),
     recursive: bool = typer.Option(False, "--recursive", "-r", help="Recurse into directories."),
+    build_graph: bool = typer.Option(
+        False,
+        "--build-graph",
+        help="Also extract entities/relations and build a knowledge graph (slow — one LLM call per chunk).",
+    ),
 ) -> None:
     """Parse, chunk, embed and index a file or directory into a knowledge base."""
     from ragkit.core.chunker import is_supported
@@ -32,7 +37,10 @@ def cmd_index(
         warn(f"No supported files found at {path}")
         raise typer.Exit(code=1)
 
-    info(f"Indexing {len(files)} file(s) into kb=[cyan]{kb}[/cyan]")
+    info(
+        f"Indexing {len(files)} file(s) into kb=[cyan]{kb}[/cyan]"
+        + (" [+graph]" if build_graph else "")
+    )
 
     failures: list[tuple[str, str]] = []
     with Progress(
@@ -50,8 +58,11 @@ def cmd_index(
                 progress.update(task, completed=prog, stage=stage)
 
             try:
-                result = index_file(fp, kb_name=kb, progress_cb=cb)
-                progress.update(task, completed=1.0, stage=f"{result['chunks']} chunks")
+                result = index_file(fp, kb_name=kb, build_graph=build_graph, progress_cb=cb)
+                done_label = f"{result['chunks']} chunks"
+                if build_graph and "graph_entities" in result:
+                    done_label += f", {result['graph_entities']}e/{result['graph_relations']}r"
+                progress.update(task, completed=1.0, stage=done_label)
             except Exception as e:
                 progress.update(task, completed=1.0, stage="[red]failed[/red]")
                 failures.append((fp.name, str(e)))
@@ -69,17 +80,50 @@ def cmd_ask(
     question: str = typer.Argument(..., help="Question to ask."),
     kb: str = typer.Option("default", "--kb", "-k", help="Knowledge base name."),
     top_k: int = typer.Option(5, "--top-k", help="Top chunks to retrieve."),
+    mode: str = typer.Option(
+        "vector",
+        "--mode",
+        "-m",
+        help="Retrieval mode: vector | local | global | hybrid.",
+    ),
     show_thinking: bool = typer.Option(False, "--thinking", help="Stream the LLM's reasoning trace."),
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON to stdout."),
 ) -> None:
-    """Ask a single question. Streams the answer to stdout, then prints citations."""
+    """Ask a single question. Streams the answer to stdout, then prints citations.
+
+    Retrieval modes:
+      vector  — original BM25 + dense (default, fastest)
+      local   — entity-neighborhood traversal on the knowledge graph
+      global  — community summaries (good for thematic questions)
+      hybrid  — vector + local graph, deduped
+    """
     from ragkit.core.generator import generate
     from ragkit.core.retriever import retrieve
 
+    valid_modes = {"vector", "local", "global", "hybrid"}
+    if mode not in valid_modes:
+        error(f"Invalid mode '{mode}'. Choose from: {', '.join(sorted(valid_modes))}")
+        raise typer.Exit(code=2)
+
     try:
-        chunks = retrieve(question, kb_name=kb, top_k=top_k)
+        if mode == "vector":
+            chunks = retrieve(question, kb_name=kb, top_k=top_k)
+        else:
+            from ragkit.core.graph.retriever import (
+                graph_hits_to_chunks,
+                retrieve_global,
+                retrieve_hybrid,
+                retrieve_local,
+            )
+            if mode == "local":
+                hits = retrieve_local(question, kb_name=kb, top_k=top_k)
+            elif mode == "global":
+                hits = retrieve_global(question, kb_name=kb, top_k=top_k)
+            else:  # hybrid
+                hits = retrieve_hybrid(question, kb_name=kb, top_k=top_k)
+            chunks = graph_hits_to_chunks(hits)
     except Exception as e:
-        error(f"Retrieval failed: {e}")
+        error(f"Retrieval failed ({mode}): {e}")
         raise typer.Exit(code=2)
 
     if as_json:

@@ -122,9 +122,33 @@ class _Completions:
     def __init__(self, parent: FakeOpenAI):
         self._parent = parent
 
-    def create(self, *, model: str, messages: list[dict], stream: bool, extra_body=None):
+    def create(
+        self,
+        *,
+        model: str,
+        messages: list[dict],
+        stream: bool = False,
+        extra_body=None,
+        response_format=None,
+        timeout=None,
+    ):
         self._parent.calls.append({"kind": "chat", "model": model, "stream": stream})
 
+        # Non-streaming path (used by extractor/summarizer/recommended-questions).
+        if not stream:
+            content = "".join(text for kind, text in self._parent.chat_script if kind == "content")
+            class _Msg:
+                def __init__(self, c: str):
+                    self.content = c
+            class _Choice:
+                def __init__(self, c: str):
+                    self.message = _Msg(c)
+            class _Resp:
+                def __init__(self, c: str):
+                    self.choices = [_Choice(c)]
+            return _Resp(content)
+
+        # Streaming path (used by the answer generator).
         def gen() -> Iterator[_FakeChatChunk]:
             for kind, text in self._parent.chat_script:
                 if kind == "content":
@@ -138,10 +162,15 @@ class _Completions:
 
 @pytest.fixture
 def fake_openai(monkeypatch: pytest.MonkeyPatch) -> FakeOpenAI:
-    """Patch openai.OpenAI everywhere we use it."""
+    """Patch openai.OpenAI everywhere we use it.
+
+    If you add a module that calls OpenAI(), add a patch line here.
+    """
     instance = FakeOpenAI()
     monkeypatch.setattr("ragkit.core.embedder.OpenAI", lambda **kw: instance)
     monkeypatch.setattr("ragkit.core.generator.OpenAI", lambda **kw: instance)
+    monkeypatch.setattr("ragkit.core.graph.extractor.OpenAI", lambda **kw: instance)
+    monkeypatch.setattr("ragkit.core.graph.summarizer.OpenAI", lambda **kw: instance)
     return instance
 
 

@@ -61,6 +61,10 @@ dependencies = [
     "xxhash",
     "numpy",
     "colorlog",
+
+    # Graph RAG
+    "networkx>=3.0",
+    "python-louvain>=0.16",
 ]
 
 [project.optional-dependencies]

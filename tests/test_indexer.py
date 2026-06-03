@@ -111,3 +111,18 @@ def test_index_file_progress_callback_fires(sample_txt, fake_openai, fake_es):
     assert "embedding" in stages
     assert "indexing" in stages
     assert stages[-1] == "done"
+
+
+def test_index_file_aborts_when_many_embeddings_fail(sample_txt, fake_openai, fake_es, monkeypatch):
+    """If >10% of chunks fail to embed (sparse Nones), refuse to index a
+    partial file silently — users wouldn't know which chunks went missing."""
+    from ragkit.core import indexer
+
+    def all_none(texts):
+        # Every chunk failed → 100% failure → must abort
+        return [None for _ in texts]
+
+    monkeypatch.setattr(indexer, "embed_batch", all_none)
+
+    with pytest.raises(RuntimeError, match="Embedding failed"):
+        index_file(sample_txt, kb_name="kb")
