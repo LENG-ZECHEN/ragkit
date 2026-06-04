@@ -142,6 +142,37 @@ class NetworkXGraphStore(GraphStore):
     def relation_count(self) -> int:
         return self.g.number_of_edges()
 
+    # ---- direct description overrides (used by LLM consolidator) --------
+    #
+    # These bypass merge() so the consolidator can REPLACE (not concatenate)
+    # the description with an LLM-summarized version.
+
+    def replace_entity_description(self, name: str, new_description: str) -> None:
+        """Overwrite an existing entity's description in place.
+
+        Used by description_merger after LLM consolidation. Going through
+        upsert_entity would trigger merge() and re-concatenate text — the
+        opposite of what we want here.
+        """
+        key = self._key(name)
+        if key not in self.g:
+            logger.warning(f"replace_entity_description: '{name}' not in graph")
+            return
+        self.g.nodes[key]["description"] = new_description
+
+    def replace_relation_description(
+        self, source: str, target: str, new_description: str
+    ) -> None:
+        """Overwrite an existing relation's description in place."""
+        src = self._key(source)
+        tgt = self._key(target)
+        if not self.g.has_edge(src, tgt):
+            logger.warning(
+                f"replace_relation_description: edge {source}↔{target} not in graph"
+            )
+            return
+        self.g.edges[src, tgt]["description"] = new_description
+
     # ---- traversal ------------------------------------------------------
 
     def neighbors(self, name: str, depth: int = 1) -> list[Entity]:

@@ -171,6 +171,7 @@ def fake_openai(monkeypatch: pytest.MonkeyPatch) -> FakeOpenAI:
     monkeypatch.setattr("ragkit.core.generator.OpenAI", lambda **kw: instance)
     monkeypatch.setattr("ragkit.core.graph.extractor.OpenAI", lambda **kw: instance)
     monkeypatch.setattr("ragkit.core.graph.summarizer.OpenAI", lambda **kw: instance)
+    monkeypatch.setattr("ragkit.core.graph.description_merger.OpenAI", lambda **kw: instance)
     return instance
 
 

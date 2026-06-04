@@ -159,6 +159,60 @@ def test_summarizer_handles_llm_failure_marks_empty(tmp_path, fake_openai, monke
     assert store.all_communities()[0].summary == ""
 
 
+def test_build_graph_runs_consolidation_by_default(tmp_path, fake_openai, monkeypatch):
+    """build_graph must call consolidate_all by default."""
+    from ragkit.core.graph.description_merger import ConsolidationResult
+
+    called = {"n": 0}
+
+    def fake_consolidate(store, **kw):
+        called["n"] += 1
+        return ConsolidationResult()
+
+    monkeypatch.setattr("ragkit.core.graph.builder.consolidate_all", fake_consolidate)
+
+    extraction = json.dumps({
+        "entities": [{"name": "x", "type": "t", "description": ""}],
+        "relations": [],
+    })
+    fake_openai.chat_script = [("content", extraction)]
+
+    store = NetworkXGraphStore(path=tmp_path / "g.json")
+    build_graph(
+        [{"id": "c1", "content_with_weight": "anything"}],
+        kb_name="t",
+        summarize=False,
+        store=store,
+    )
+    assert called["n"] == 1
+
+
+def test_build_graph_skips_consolidation_when_flag_off(tmp_path, fake_openai, monkeypatch):
+    """--no-consolidate path: consolidate_all is NOT called."""
+    called = {"n": 0}
+
+    def trap(store, **kw):
+        called["n"] += 1
+
+    monkeypatch.setattr("ragkit.core.graph.builder.consolidate_all", trap)
+
+    extraction = json.dumps({
+        "entities": [{"name": "x", "type": "t", "description": ""}],
+        "relations": [],
+    })
+    fake_openai.chat_script = [("content", extraction)]
+
+    store = NetworkXGraphStore(path=tmp_path / "g.json")
+    build_graph(
+        [{"id": "c1", "content_with_weight": "anything"}],
+        kb_name="t",
+        summarize=False,
+        consolidate_descriptions=False,
+        store=store,
+    )
+    assert called["n"] == 0
+
+
 def test_build_graph_persists_to_disk(tmp_path, fake_openai):
     """Build → file must exist & be reloadable."""
     extraction = json.dumps({

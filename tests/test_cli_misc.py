@@ -205,7 +205,7 @@ def test_graph_build_passes_summarize_flag(tmp_path, fake_openai, fake_es, monke
 
     captured: dict = {}
 
-    def fake_build(chunks, kb_name, *, summarize, max_summary_communities, progress_cb=None):
+    def fake_build(chunks, kb_name, *, summarize, max_summary_communities, progress_cb=None, **kw):
         captured["summarize"] = summarize
         captured["max"] = max_summary_communities
         # Return a store-like object the CLI can call .entity_count() etc on.

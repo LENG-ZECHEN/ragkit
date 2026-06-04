@@ -1,4 +1,4 @@
-"""Orchestrates graph construction: extract → store → detect → summarize.
+"""Orchestrates graph construction: extract → consolidate → detect → summarize.
 
 This is the function the indexer (and `rag graph build` CLI) call.
 """
@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Callable, Iterable
 
 from ragkit.core.graph.community import detect_communities
+from ragkit.core.graph.description_merger import consolidate_all
 from ragkit.core.graph.extractor import extract_from_text
 from ragkit.core.graph.store import GraphStore, NetworkXGraphStore, open_store
 from ragkit.core.graph.summarizer import summarize_all
@@ -19,7 +20,9 @@ def build_graph(
     kb_name: str,
     *,
     summarize: bool = True,
+    consolidate_descriptions: bool = True,
     max_summary_communities: int = 20,
+    max_consolidation_calls: int = 20,
     progress_cb: Callable[[str, int, int], None] | None = None,
     store: GraphStore | None = None,
 ) -> GraphStore:
@@ -75,6 +78,14 @@ def build_graph(
         f"Extracted {store.entity_count()} entities, {store.relation_count()} relations "
         f"({extraction_failures} chunk(s) produced nothing)"
     )
+
+    # ---- 1.5. description consolidation (LLM rewrite of long descriptions) ----
+    if consolidate_descriptions:
+        consolidate_all(
+            store,
+            max_calls=max_consolidation_calls,
+            progress_cb=progress_cb,
+        )
 
     # ---- 2. community detection --------------------------------------
     if isinstance(store, NetworkXGraphStore):

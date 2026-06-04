@@ -14,6 +14,16 @@ def cmd_graph_build(
     kb: str = typer.Option(..., "--kb", "-k", help="Knowledge base name (existing ES index)."),
     summarize: bool = typer.Option(True, "--summarize/--no-summarize", help="Run community summaries (slow)."),
     max_summaries: int = typer.Option(20, "--max-summaries", help="Cap on summarized communities."),
+    consolidate: bool = typer.Option(
+        True,
+        "--consolidate/--no-consolidate",
+        help="LLM-merge long entity/relation descriptions to keep them concise.",
+    ),
+    max_consolidations: int = typer.Option(
+        20,
+        "--max-consolidations",
+        help="Cap on consolidation LLM calls per build.",
+    ),
 ) -> None:
     """Build a knowledge graph from an already-indexed KB.
 
@@ -91,7 +101,9 @@ def cmd_graph_build(
             chunks,
             kb_name=kb,
             summarize=summarize,
+            consolidate_descriptions=consolidate,
             max_summary_communities=max_summaries,
+            max_consolidation_calls=max_consolidations,
             progress_cb=cb,
         )
         progress.update(task, completed=1.0, stage="done", detail="")

@@ -151,3 +151,66 @@ def test_clear_removes_data_and_file(tmp_path):
     s.clear()
     assert s.entity_count() == 0
     assert not path.exists()
+
+
+# ----- replace_*_description (direct override, bypassing merge) -----------
+
+
+def test_replace_entity_description_overwrites_not_concatenates(tmp_path):
+    """LLM consolidator depends on this: replace must REPLACE, not append."""
+    store = _make_store(tmp_path)
+    store.upsert_entity(Entity(name="x", type="t", description="A B C D E F"))
+    store.replace_entity_description("x", "Z")
+    e = store.get_entity("x")
+    assert e is not None
+    assert e.description == "Z"
+    assert "A" not in e.description  # No concatenation happened
+
+
+def test_replace_entity_description_unknown_entity_is_noop(tmp_path):
+    """Calling replace on a missing entity must not crash (logs a warning)."""
+    store = _make_store(tmp_path)
+    store.replace_entity_description("ghost", "anything")
+    assert store.entity_count() == 0
+
+
+def test_replace_entity_description_is_case_insensitive(tmp_path):
+    """The store normalizes names to lowercase; replace must match too."""
+    store = _make_store(tmp_path)
+    store.upsert_entity(Entity(name="OpenAI", type="org", description="orig"))
+    store.replace_entity_description("OPENAI", "new")
+    e = store.get_entity("openai")
+    assert e is not None
+    assert e.description == "new"
+
+
+def test_replace_relation_description_overwrites(tmp_path):
+    """Same semantics for relations."""
+    store = _make_store(tmp_path)
+    store.upsert_relation(Relation(source="a", target="b", description="orig"))
+    store.replace_relation_description("a", "b", "new")
+    edges = list(store.all_relations())
+    assert len(edges) == 1
+    assert edges[0].description == "new"
+
+
+def test_replace_relation_description_unknown_edge_is_noop(tmp_path):
+    """Calling replace on a missing edge must not crash."""
+    store = _make_store(tmp_path)
+    store.replace_relation_description("x", "y", "anything")
+    assert store.relation_count() == 0
+
+
+def test_replace_persists_through_save_load(tmp_path):
+    """Replacement must survive serialization (no special field involved
+    — but verify the description actually got persisted)."""
+    path = tmp_path / "g.json"
+    s1 = NetworkXGraphStore(path)
+    s1.upsert_entity(Entity(name="x", type="t", description="orig"))
+    s1.replace_entity_description("x", "rewritten")
+    s1.save()
+
+    s2 = NetworkXGraphStore(path)
+    e = s2.get_entity("x")
+    assert e is not None
+    assert e.description == "rewritten"
