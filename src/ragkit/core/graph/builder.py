@@ -9,6 +9,7 @@ from typing import Callable, Iterable
 
 from ragkit.core.graph.community import detect_communities
 from ragkit.core.graph.description_merger import consolidate_all
+from ragkit.core.graph.es_indexer import index_graph_to_es
 from ragkit.core.graph.extractor import extract_from_text
 from ragkit.core.graph.store import GraphStore, NetworkXGraphStore, open_store
 from ragkit.core.graph.summarizer import summarize_all
@@ -21,6 +22,7 @@ def build_graph(
     *,
     summarize: bool = True,
     consolidate_descriptions: bool = True,
+    index_to_es: bool = True,
     max_summary_communities: int = 20,
     max_consolidation_calls: int = 20,
     progress_cb: Callable[[str, int, int], None] | None = None,
@@ -103,4 +105,18 @@ def build_graph(
         )
 
     store.save()
+
+    # ---- 4. ES indexing of graph artifacts (task #24) ----------------
+    if index_to_es:
+        try:
+            index_graph_to_es(store, kb_name, progress_cb=progress_cb)
+        except Exception as e:
+            # ES indexing failures shouldn't lose the JSON graph (already
+            # saved above). Log loudly so the user knows graph retrieval
+            # via ES won't work until they fix ES + re-run build.
+            logger.error(
+                f"Graph ES indexing failed for {kb_name}: {e}. "
+                "JSON graph is still saved; rerun `rag graph build` after fixing ES."
+            )
+
     return store

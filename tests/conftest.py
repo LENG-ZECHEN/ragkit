@@ -205,6 +205,7 @@ def fake_es(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     )
     monkeypatch.setattr("ragkit.core.indexer.ESConnection", lambda: fake)
     monkeypatch.setattr("ragkit.core.kb_manager.ESConnection", lambda: fake)
+    monkeypatch.setattr("ragkit.core.graph.es_indexer.ESConnection", lambda: fake)
     return fake
 
 

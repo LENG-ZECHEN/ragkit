@@ -107,11 +107,13 @@ def test_kb_delete_aborts_without_confirmation(fake_es):
 
 
 def test_kb_delete_with_yes_flag_proceeds(fake_es):
-    """--yes flag exists so scripts can automate cleanup."""
+    """--yes flag exists so scripts can automate cleanup. After task #24, kb
+    delete also drops the companion {kb}_graph index to avoid orphans."""
     fake_es.delete_index.return_value = True
     result = runner.invoke(app, ["kb", "delete", "finance", "--yes"])
     assert result.exit_code == 0
-    fake_es.delete_index.assert_called_once_with("finance")
+    called_indices = {c.args[0] for c in fake_es.delete_index.call_args_list}
+    assert called_indices == {"finance", "finance_graph"}
 
 
 def test_doctor_exits_nonzero_when_api_key_missing(monkeypatch, fake_es):

@@ -229,13 +229,26 @@ def cmd_graph_clear(
     kb: str = typer.Argument(..., help="Knowledge base name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Delete the graph file for a knowledge base."""
+    """Delete the graph file and its ES index for a knowledge base.
+
+    The chunk index ({kb}) stays intact — only the derived graph layer is removed.
+    """
     from ragkit.core.graph.store import open_store
+    from ragkit.core.rag.utils.es_conn import ESConnection
 
     if not yes:
-        if not typer.confirm(f"Delete graph for '{kb}'? (vector index stays)"):
+        if not typer.confirm(f"Delete graph for '{kb}'? (chunk index stays)"):
             info("Cancelled.")
             return
+
+    # Delete JSON file
     store = open_store(kb)
     store.clear()
+
+    # Delete companion ES index (best-effort — not fatal if it doesn't exist)
+    try:
+        ESConnection().delete_index(f"{kb}_graph")
+    except Exception as e:
+        logger.debug(f"Cleanup of {kb}_graph index failed (may not exist): {e}")
+
     success(f"Cleared graph for '{kb}'")

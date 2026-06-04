@@ -230,15 +230,29 @@ def cmd_kb_delete(
     name: str = typer.Argument(..., help="Knowledge base name to delete."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
-    """Delete a knowledge base. Irreversible."""
+    """Delete a knowledge base. Irreversible.
+
+    Also removes the companion {name}_graph index if it exists (avoids
+    orphan graph data after the chunk index is gone).
+    """
     from ragkit.core.kb_manager import delete_kb
+    from ragkit.core.rag.utils.es_conn import ESConnection
 
     if not yes:
         confirm = typer.confirm(f"Delete knowledge base '{name}'? This cannot be undone.")
         if not confirm:
             info("Cancelled.")
             return
-    if delete_kb(name):
+
+    deleted = delete_kb(name)
+
+    # Also drop the graph companion index — best-effort, may not exist.
+    try:
+        ESConnection().delete_index(f"{name}_graph")
+    except Exception:
+        pass  # not fatal — kb itself is the source of truth
+
+    if deleted:
         success(f"Deleted '{name}'")
     else:
         warn(f"'{name}' did not exist")
