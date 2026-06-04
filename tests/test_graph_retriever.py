@@ -1,281 +1,331 @@
-"""Graph retriever — three modes (local / global / hybrid)."""
+"""Graph retriever (Microsoft-GraphRAG style) — task #25.
+
+Covers retrieve_local (4-stream multi-source) and retrieve_global
+(Map-Reduce). Hybrid mode was removed in task #25.
+
+External calls (ES, embed_one, LLM) are mocked at the searcher /
+global_search boundary so the tests run without DashScope or ES.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 
+from ragkit.core.graph.global_search import RatedPoint
 from ragkit.core.graph.retriever import (
-    _find_mentioned_entities,
+    GraphHit,
     graph_hits_to_chunks,
     retrieve_global,
-    retrieve_hybrid,
     retrieve_local,
 )
 from ragkit.core.graph.store import NetworkXGraphStore
-from ragkit.core.graph.types import Community, Entity, Relation
-from ragkit.core.retriever import RetrievedChunk
+from ragkit.core.graph.types import Community, Entity, Finding, Relation
 
 
-def _make_populated_store(tmp_path: Path) -> NetworkXGraphStore:
+# --------------------------------------------------------------------------
+# Test fixtures
+# --------------------------------------------------------------------------
+
+
+def _seed_entity_doc(name: str, source_chunks: list[str] | None = None) -> dict:
+    """ES _source dict mimicking what search_entities_by_vector returns."""
+    return {
+        "entity_name_kwd": name,
+        "entity_type_kwd": "model",
+        "source_chunks_kwd": source_chunks or ["c1"],
+        "content_with_weight": f"{name}: desc",
+    }
+
+
+def _community_doc(cid: int, level: int, entity_names: list[str], summary: str = "") -> dict:
+    return {
+        "community_id_int": cid,
+        "community_level_int": level,
+        "community_rank_flt": 8.0,
+        "community_entity_names_kwd": entity_names,
+        "content_with_weight": summary or f"Community {cid} summary",
+    }
+
+
+def _populated_store(tmp_path: Path) -> NetworkXGraphStore:
+    """Local NetworkX graph with a few entities and relations for the
+    neighbor / relation streams to walk."""
     store = NetworkXGraphStore(path=tmp_path / "g.json")
-    store.upsert_entity(Entity(
-        name="qwen", type="model",
-        description="A large language model by Alibaba.",
-        source_chunks=["c1", "c2"],
-    ))
-    store.upsert_entity(Entity(
-        name="dashscope", type="platform",
-        description="Alibaba's LLM hosting platform.",
-        source_chunks=["c1"],
-    ))
-    store.upsert_entity(Entity(
-        name="alibaba", type="organization",
-        description="Chinese tech company.",
-        source_chunks=["c1", "c3"],
-    ))
-    store.upsert_relation(Relation(
-        source="qwen", target="dashscope",
-        description="hosted on", source_chunks=["c1"],
-    ))
-    store.upsert_relation(Relation(
-        source="dashscope", target="alibaba",
-        description="operated by", source_chunks=["c1"],
-    ))
+    store.upsert_entity(Entity(name="qwen", type="model", description="阿里 LLM",
+                               source_chunks=["c1", "c2"]))
+    store.upsert_entity(Entity(name="dashscope", type="platform", description="平台",
+                               source_chunks=["c1"]))
+    store.upsert_entity(Entity(name="alibaba", type="organization", description="公司",
+                               source_chunks=["c2"]))
+    store.upsert_relation(Relation(source="qwen", target="dashscope",
+                                   description="部署在", weight=3.0))
+    store.upsert_relation(Relation(source="dashscope", target="alibaba",
+                                   description="隶属于", weight=2.0))
     return store
 
 
-# ----- entity matching --------------------------------------------------
+# ==========================================================================
+# Input validation (applies to both retrieve_local and retrieve_global)
+# ==========================================================================
 
 
-def test_find_mentioned_entities_matches_substrings(tmp_path):
-    """Substring match handles 'qwen' inside '介绍一下 qwen 模型'."""
-    store = _make_populated_store(tmp_path)
-    found = _find_mentioned_entities("介绍一下 qwen 模型", store)
-    names = {e.name for e in found}
-    assert "qwen" in names
-
-
-def test_find_mentioned_entities_skips_super_short_names(tmp_path):
-    """A 1-char entity like 'X' would match almost any question — skip."""
-    store = NetworkXGraphStore(path=tmp_path / "g.json")
-    store.upsert_entity(Entity(name="x", type="t"))
-    store.upsert_entity(Entity(name="qwen", type="model"))
-    found = _find_mentioned_entities("tell me about qwen", store)
-    names = {e.name for e in found}
-    assert "x" not in names
-    assert "qwen" in names
-
-
-# ----- local retrieval --------------------------------------------------
-
-
-def test_retrieve_local_returns_seed_and_neighbors(tmp_path):
-    """Local query: question mentions qwen → return qwen + connected entities."""
-    store = _make_populated_store(tmp_path)
-    hits = retrieve_local("what is qwen?", kb_name="t", depth=1, store=store)
-
-    titles = {h.title for h in hits}
-    assert any("qwen" in t for t in titles)
-    # Within 1 hop we should also see dashscope
-    assert any("dashscope" in t for t in titles)
-
-
-def test_retrieve_local_empty_when_no_match(tmp_path):
-    """A question mentioning no known entities returns empty — not an error."""
-    store = _make_populated_store(tmp_path)
-    hits = retrieve_local("what is the meaning of life", kb_name="t", store=store)
-    assert hits == []
-
-
-def test_retrieve_local_includes_relations_in_content(tmp_path):
-    """Local hits must carry the relation context so the LLM can use it."""
-    store = _make_populated_store(tmp_path)
-    hits = retrieve_local("qwen", kb_name="t", store=store)
-    qwen_hit = next(h for h in hits if "qwen" in h.title)
-    assert "dashscope" in qwen_hit.content.lower() or "关系" in qwen_hit.content
-
-
-# ----- global retrieval -------------------------------------------------
-
-
-def test_retrieve_global_returns_top_summaries(tmp_path):
-    store = _make_populated_store(tmp_path)
-    store.set_communities([
-        Community(id=0, entity_names=["qwen", "dashscope"], summary="LLM platform group."),
-        Community(id=1, entity_names=["alibaba"], summary="Parent company."),
-    ])
-    hits = retrieve_global("tell me about the LLM platform", kb_name="t", top_k=5, store=store)
-
-    assert len(hits) == 2
-    # Summary that overlaps with the query should rank first.
-    assert "LLM" in hits[0].content
-
-
-def test_retrieve_global_empty_when_no_summaries(tmp_path):
-    """No summaries (graph built without --summarize) → empty list, not crash."""
-    store = _make_populated_store(tmp_path)
-    # No communities set.
-    hits = retrieve_global("anything", kb_name="t", store=store)
-    assert hits == []
-
-
-def test_retrieve_global_renders_structured_report(tmp_path):
-    """A community with title/summary/findings should render all three in
-    the hit content so the LLM sees the rich context (task #23)."""
-    from ragkit.core.graph.types import Finding
-    store = _make_populated_store(tmp_path)
-    store.set_communities([
-        Community(
-            id=0,
-            entity_names=["qwen", "dashscope", "alibaba"],
-            title="国产大模型生态",
-            summary="围绕通义千问及其托管平台的国产 LLM 生态系统。",
-            rank=8.0,
-            findings=[
-                Finding(summary="qwen 是阿里旗舰大模型", explanation="详细说明..."),
-                Finding(summary="DashScope 提供 API 访问", explanation="..."),
-            ],
-        )
-    ])
-    hits = retrieve_global("讲讲国产大模型", kb_name="t", store=store, top_k=1)
-
-    assert len(hits) == 1
-    content = hits[0].content
-    # All three parts of the structured report present
-    assert "国产大模型生态" in content       # title
-    assert "通义千问" in content              # summary
-    assert "qwen 是阿里旗舰大模型" in content  # finding
-    # Title surfaces in hit metadata as well
-    assert "国产大模型生态" in hits[0].title
-
-
-def test_retrieve_global_handles_legacy_summary_only(tmp_path):
-    """Old graphs (pre task #23) only have `summary`. Must still render
-    something usable for the LLM."""
-    store = _make_populated_store(tmp_path)
-    store.set_communities([
-        Community(
-            id=0,
-            entity_names=["qwen", "dashscope"],
-            summary="A legacy summary string.",
-            # title, findings all default-empty
-        )
-    ])
-    hits = retrieve_global("anything", kb_name="t", store=store, top_k=1)
-
-    assert len(hits) == 1
-    assert "A legacy summary string." in hits[0].content
-    # Title falls back to "Community {id}"
-    assert "Community 0" in hits[0].title
-
-
-# ----- hybrid retrieval -------------------------------------------------
-
-
-def test_retrieve_hybrid_combines_vector_and_local(tmp_path, monkeypatch):
-    """Hybrid = vector chunks + local graph hits, deduped."""
-    store = _make_populated_store(tmp_path)
-
-    # Mock vector retrieval to return two chunks.
-    def fake_vector_retrieve(question, **kwargs):
-        return [
-            RetrievedChunk(rank=1, document_id="d1", document_name="paper.pdf",
-                           content="Qwen is an LLM family.", similarity=0.9,
-                           vector_similarity=0.9, term_similarity=0.9),
-            RetrievedChunk(rank=2, document_id="d2", document_name="memo.docx",
-                           content="DashScope offers API access.", similarity=0.8,
-                           vector_similarity=0.8, term_similarity=0.8),
-        ]
-    monkeypatch.setattr("ragkit.core.graph.retriever.vector_retrieve", fake_vector_retrieve)
-
-    hits = retrieve_hybrid("about qwen", kb_name="t", top_k=3, store=store)
-
-    assert len(hits) > 0
-    kinds = {h.kind for h in hits}
-    # We expect both kinds in a hybrid result.
-    assert "chunk" in kinds
-    assert "entity" in kinds
-
-
-def test_retrieve_hybrid_survives_vector_failure(tmp_path, monkeypatch):
-    """If ES is down, hybrid should still return graph results, not crash.
-    Vector failure is logged at ERROR level so it doesn't go unnoticed."""
-    store = _make_populated_store(tmp_path)
-
-    def broken_vector(*args, **kwargs):
-        raise RuntimeError("ES connection refused")
-
-    monkeypatch.setattr("ragkit.core.graph.retriever.vector_retrieve", broken_vector)
-
-    hits = retrieve_hybrid("about qwen", kb_name="t", store=store)
-
-    # No chunk-kind hits because vector failed — caller can detect this.
-    assert all(h.kind == "entity" for h in hits)
-    assert not any(h.kind == "chunk" for h in hits)
-
-
-def test_retrieve_hybrid_both_empty_returns_empty(tmp_path, monkeypatch):
-    """When both vector AND graph return nothing, hybrid returns []."""
-    store = NetworkXGraphStore(path=tmp_path / "g.json")  # empty graph
-
-    def empty_vector(*args, **kwargs):
-        return []
-    monkeypatch.setattr("ragkit.core.graph.retriever.vector_retrieve", empty_vector)
-
-    hits = retrieve_hybrid("nothing matches", kb_name="t", store=store)
-    assert hits == []
-
-
-def test_retriever_rejects_empty_inputs(tmp_path):
-    """All three retrieval modes must validate kb_name and question."""
-    store = NetworkXGraphStore(path=tmp_path / "g.json")
-    for fn in (retrieve_local, retrieve_global, retrieve_hybrid):
-        with pytest.raises(ValueError):
+def test_retriever_rejects_empty_question(tmp_path):
+    store = _populated_store(tmp_path)
+    for fn in (retrieve_local, retrieve_global):
+        with pytest.raises(ValueError, match="non-empty"):
             fn("", kb_name="kb", store=store)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="non-empty"):
+            fn("   ", kb_name="kb", store=store)
+
+
+def test_retriever_rejects_empty_kb_name(tmp_path):
+    store = _populated_store(tmp_path)
+    for fn in (retrieve_local, retrieve_global):
+        with pytest.raises(ValueError, match="non-empty"):
             fn("q", kb_name="", store=store)
 
 
-def test_retriever_local_rejects_unbounded_depth(tmp_path):
-    """Catch the obvious foot-gun of `depth=1000`."""
-    store = NetworkXGraphStore(path=tmp_path / "g.json")
-    with pytest.raises(ValueError, match="depth"):
-        retrieve_local("q", kb_name="kb", depth=1000, store=store)
+# ==========================================================================
+# retrieve_local — Multi-source / 4-stream
+# ==========================================================================
 
 
-def test_hybrid_dedupes_identical_content(tmp_path, monkeypatch):
-    """If a vector chunk and a graph hit have identical content, drop one."""
-    store = NetworkXGraphStore(path=tmp_path / "g.json")
-    store.upsert_entity(Entity(name="qwen", type="model", description="The same content here."))
+def test_local_returns_empty_when_no_seed_entities(tmp_path, monkeypatch):
+    """No entity vector search hits → empty result, not crash."""
+    store = _populated_store(tmp_path)
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_entities_by_vector",
+        lambda kb, q, top_k: [],
+    )
+    assert retrieve_local("anything", kb_name="kb", store=store) == []
 
-    def fake_vector_retrieve(question, **kwargs):
+
+def test_local_collects_chunks_from_seed_source_chunks(tmp_path, monkeypatch):
+    """Stream 1 (text units): seed entities' source_chunks → mget {kb}."""
+    store = _populated_store(tmp_path)
+
+    # Seed entity references chunks c1, c2.
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_entities_by_vector",
+        lambda kb, q, top_k: [_seed_entity_doc("qwen", source_chunks=["c1", "c2"])],
+    )
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.fetch_chunks_by_ids",
+        lambda kb, ids: [
+            {"_id": "c1", "doc_id": "d1", "docnm_kwd": "report.pdf",
+             "content_with_weight": "TEXT_FROM_C1"},
+            {"_id": "c2", "doc_id": "d1", "docnm_kwd": "report.pdf",
+             "content_with_weight": "TEXT_FROM_C2"},
+        ],
+    )
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_communities_by_entity_names",
+        lambda kb, names, top_k: [],
+    )
+    hits = retrieve_local("about qwen", kb_name="kb", store=store)
+
+    chunk_hits = [h for h in hits if h.kind == "chunk"]
+    assert len(chunk_hits) == 2
+    contents = {h.content for h in chunk_hits}
+    assert contents == {"TEXT_FROM_C1", "TEXT_FROM_C2"}
+
+
+def test_local_collects_communities_containing_seed(tmp_path, monkeypatch):
+    """Stream 2 (community reports): search_communities_by_entity_names."""
+    store = _populated_store(tmp_path)
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_entities_by_vector",
+        lambda kb, q, top_k: [_seed_entity_doc("qwen")],
+    )
+    monkeypatch.setattr("ragkit.core.graph.retriever.fetch_chunks_by_ids", lambda kb, ids: [])
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_communities_by_entity_names",
+        lambda kb, names, top_k: [
+            _community_doc(0, 0, ["qwen", "dashscope"],
+                           summary="QWEN_ECOSYSTEM_SUMMARY"),
+        ],
+    )
+
+    hits = retrieve_local("about qwen", kb_name="kb", store=store)
+
+    community_hits = [h for h in hits if h.kind == "community"]
+    assert len(community_hits) == 1
+    assert community_hits[0].content == "QWEN_ECOSYSTEM_SUMMARY"
+
+
+def test_local_collects_neighbor_entities(tmp_path, monkeypatch):
+    """Stream 3: NetworkX 1-hop neighbors of the seed."""
+    store = _populated_store(tmp_path)
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_entities_by_vector",
+        lambda kb, q, top_k: [_seed_entity_doc("qwen")],
+    )
+    monkeypatch.setattr("ragkit.core.graph.retriever.fetch_chunks_by_ids", lambda kb, ids: [])
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_communities_by_entity_names",
+        lambda kb, names, top_k: [],
+    )
+
+    hits = retrieve_local("about qwen", kb_name="kb", store=store)
+
+    entity_hits = [h for h in hits if h.kind == "entity"]
+    names = {h.extra["name"] for h in entity_hits}
+    # qwen is the seed; dashscope is 1-hop neighbor → must appear.
+    assert "dashscope" in names
+    # qwen itself should NOT appear in the neighbor stream.
+    assert "qwen" not in names
+
+
+def test_local_collects_relations(tmp_path, monkeypatch):
+    """Stream 4: relations where at least one endpoint is the seed."""
+    store = _populated_store(tmp_path)
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_entities_by_vector",
+        lambda kb, q, top_k: [_seed_entity_doc("qwen")],
+    )
+    monkeypatch.setattr("ragkit.core.graph.retriever.fetch_chunks_by_ids", lambda kb, ids: [])
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_communities_by_entity_names",
+        lambda kb, names, top_k: [],
+    )
+
+    hits = retrieve_local("about qwen", kb_name="kb", store=store)
+
+    rel_hits = [h for h in hits if h.kind == "relation"]
+    rel_pairs = {(h.extra["source"], h.extra["target"]) for h in rel_hits}
+    assert ("qwen", "dashscope") in rel_pairs
+
+
+def test_local_groups_streams_in_order(tmp_path, monkeypatch):
+    """Output order: chunks → communities → entities → relations."""
+    store = _populated_store(tmp_path)
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_entities_by_vector",
+        lambda kb, q, top_k: [_seed_entity_doc("qwen", source_chunks=["c1"])],
+    )
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.fetch_chunks_by_ids",
+        lambda kb, ids: [{"_id": "c1", "doc_id": "d", "docnm_kwd": "r.pdf",
+                          "content_with_weight": "T"}],
+    )
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_communities_by_entity_names",
+        lambda kb, names, top_k: [_community_doc(0, 0, ["qwen", "dashscope"], "S")],
+    )
+
+    hits = retrieve_local("about qwen", kb_name="kb", store=store)
+
+    kinds_in_order = [h.kind for h in hits]
+    # We expect: chunk, community, entity*, relation*
+    assert kinds_in_order[0] == "chunk"
+    # community comes after chunks
+    assert "community" in kinds_in_order
+    assert kinds_in_order.index("community") > kinds_in_order.index("chunk")
+    # entities come after communities
+    if "entity" in kinds_in_order:
+        assert kinds_in_order.index("entity") > kinds_in_order.index("community")
+
+
+# ==========================================================================
+# retrieve_global — Map-Reduce
+# ==========================================================================
+
+
+def test_global_returns_empty_when_no_community_reports(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_communities_by_vector",
+        lambda kb, q, level, top_k: [],
+    )
+    assert retrieve_global("anything", kb_name="kb") == []
+
+
+def test_global_runs_map_reduce_and_returns_points(tmp_path, monkeypatch):
+    """Happy path: community vector search → map-reduce → rated points."""
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_communities_by_vector",
+        lambda kb, q, level, top_k: [
+            _community_doc(0, 0, ["a", "b"], summary="S0"),
+            _community_doc(1, 0, ["c", "d"], summary="S1"),
+        ],
+    )
+
+    # Mock the map-reduce pipeline to return 2 rated points.
+    def fake_run(question, community_reports, **kw):
         return [
-            RetrievedChunk(rank=1, document_id="d", document_name="doc",
-                           content="The same content here.", similarity=0.9,
-                           vector_similarity=0.9, term_similarity=0.9),
+            RatedPoint(point="POINT_A", rating=9),
+            RatedPoint(point="POINT_B", rating=7),
         ]
-    monkeypatch.setattr("ragkit.core.graph.retriever.vector_retrieve", fake_vector_retrieve)
 
-    hits = retrieve_hybrid("qwen", kb_name="t", store=store)
-    contents = [h.content for h in hits]
-    # Same content prefix shouldn't appear twice.
-    assert len(set(c[:200] for c in contents)) == len(contents)
+    monkeypatch.setattr("ragkit.core.graph.retriever.run_global_search", fake_run)
+
+    hits = retrieve_global("themes?", kb_name="kb")
+
+    assert len(hits) == 2
+    assert all(h.kind == "point" for h in hits)
+    # Highest-rated point first (already sorted by map-reduce)
+    assert hits[0].content == "POINT_A"
+    assert hits[0].extra["rating"] == 9
 
 
-# ----- conversion -------------------------------------------------------
+def test_global_passes_level_filter_through(tmp_path, monkeypatch):
+    """--level N must propagate to search_communities_by_vector."""
+    captured = {}
+
+    def fake_search(kb, question, *, level, top_k):
+        captured["level"] = level
+        return []
+
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_communities_by_vector", fake_search
+    )
+
+    retrieve_global("q", kb_name="kb", level=2)
+    assert captured["level"] == 2
+
+    captured.clear()
+    retrieve_global("q", kb_name="kb")  # default
+    assert captured["level"] is None
 
 
-def test_graph_hits_to_chunks_preserves_order(tmp_path):
-    """Conversion mustn't reorder — the generator's citations use rank."""
-    from ragkit.core.graph.retriever import GraphHit
+def test_global_returns_empty_when_all_points_below_threshold(tmp_path, monkeypatch):
+    """Map-Reduce returned no surviving points → empty result, not crash."""
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.search_communities_by_vector",
+        lambda kb, q, level, top_k: [_community_doc(0, 0, ["a"], "S")],
+    )
+    monkeypatch.setattr(
+        "ragkit.core.graph.retriever.run_global_search",
+        lambda *a, **kw: [],
+    )
+    assert retrieve_global("q", kb_name="kb") == []
+
+
+# ==========================================================================
+# Adapter: graph_hits_to_chunks
+# ==========================================================================
+
+
+def test_graph_hits_to_chunks_preserves_rank_and_kind(tmp_path):
     hits = [
-        GraphHit(rank=1, kind="entity", title="A", content="a", extra={}),
-        GraphHit(rank=2, kind="community", title="B", content="b", extra={}),
-        GraphHit(rank=3, kind="chunk", title="C", content="c", extra={"document_id": "doc-c", "similarity": 0.7}),
+        GraphHit(rank=1, kind="chunk", title="r.pdf", content="x", extra={"document_id": "d"}),
+        GraphHit(rank=2, kind="entity", title="qwen [model]", content="y", extra={}),
+        GraphHit(rank=3, kind="point", title="Point (rating 9/10)", content="z", extra={"rating": 9}),
     ]
     chunks = graph_hits_to_chunks(hits)
     assert [c.rank for c in chunks] == [1, 2, 3]
-    assert chunks[2].similarity == 0.7
+    # First chunk's document_id was preserved through extra.
+    assert chunks[0].document_id == "d"
+
+
+# ==========================================================================
+# Regression: hybrid mode is removed
+# ==========================================================================
+
+
+def test_retrieve_hybrid_no_longer_exists():
+    """hybrid was removed in task #25 — importing it should fail."""
+    with pytest.raises(ImportError):
+        from ragkit.core.graph.retriever import retrieve_hybrid  # noqa: F401

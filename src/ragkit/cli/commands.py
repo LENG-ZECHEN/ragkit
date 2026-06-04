@@ -84,23 +84,29 @@ def cmd_ask(
         "vector",
         "--mode",
         "-m",
-        help="Retrieval mode: vector | local | global | hybrid.",
+        help="Retrieval mode: vector | local | global.",
+    ),
+    level: int = typer.Option(
+        None,
+        "--level",
+        help="(global only) Restrict to community hierarchy level N (0=coarsest). "
+             "Default: cross-level vector search.",
     ),
     show_thinking: bool = typer.Option(False, "--thinking", help="Stream the LLM's reasoning trace."),
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON to stdout."),
 ) -> None:
     """Ask a single question. Streams the answer to stdout, then prints citations.
 
-    Retrieval modes:
-      vector  — original BM25 + dense (default, fastest)
-      local   — entity-neighborhood traversal on the knowledge graph
-      global  — community summaries (good for thematic questions)
-      hybrid  — vector + local graph, deduped
+    Retrieval modes (Microsoft-GraphRAG-aligned):
+      vector  — Original BM25 + dense (default, fastest)
+      local   — Entity-centric multi-source retrieval (4 streams: text units,
+                community reports, neighbor entities, relations)
+      global  — Map-Reduce over community reports (best for thematic queries)
     """
     from ragkit.core.generator import generate
     from ragkit.core.retriever import retrieve
 
-    valid_modes = {"vector", "local", "global", "hybrid"}
+    valid_modes = {"vector", "local", "global"}
     if mode not in valid_modes:
         error(f"Invalid mode '{mode}'. Choose from: {', '.join(sorted(valid_modes))}")
         raise typer.Exit(code=2)
@@ -112,15 +118,12 @@ def cmd_ask(
             from ragkit.core.graph.retriever import (
                 graph_hits_to_chunks,
                 retrieve_global,
-                retrieve_hybrid,
                 retrieve_local,
             )
             if mode == "local":
                 hits = retrieve_local(question, kb_name=kb, top_k=top_k)
-            elif mode == "global":
-                hits = retrieve_global(question, kb_name=kb, top_k=top_k)
-            else:  # hybrid
-                hits = retrieve_hybrid(question, kb_name=kb, top_k=top_k)
+            else:  # global
+                hits = retrieve_global(question, kb_name=kb, top_k=top_k, level=level)
             chunks = graph_hits_to_chunks(hits)
     except Exception as e:
         error(f"Retrieval failed ({mode}): {e}")

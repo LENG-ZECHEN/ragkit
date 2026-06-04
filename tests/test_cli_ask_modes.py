@@ -97,20 +97,15 @@ def test_ask_mode_global_calls_graph_global(fake_openai, monkeypatch):
     assert called["global"] is True
 
 
-def test_ask_mode_hybrid_calls_graph_hybrid(fake_openai, monkeypatch):
-    called = {"hybrid": False}
-
-    def fake_hybrid(question, kb_name, **kw):
-        called["hybrid"] = True
-        from ragkit.core.graph.retriever import GraphHit
-        return [GraphHit(rank=1, kind="chunk", title="d", content="c", extra={})]
-
-    monkeypatch.setattr("ragkit.core.graph.retriever.retrieve_hybrid", fake_hybrid)
-    fake_openai.chat_script = [("content", "ok")]
-
-    result = runner.invoke(app, ["ask", "Q", "-k", "kb", "--mode", "hybrid"])
-    assert result.exit_code == 0
-    assert called["hybrid"] is True
+def test_ask_mode_hybrid_now_rejected(fake_openai, fake_es):
+    """Hybrid mode was removed in task #25 — should be rejected as invalid."""
+    result = runner.invoke(app, ["ask", "Q", "--mode", "hybrid"])
+    assert result.exit_code == 2
+    assert "hybrid" in result.stdout
+    # The hint should list only the surviving modes.
+    assert "vector" in result.stdout
+    assert "local" in result.stdout
+    assert "global" in result.stdout
 
 
 def test_ask_rejects_invalid_mode(fake_openai, fake_es):
@@ -119,7 +114,7 @@ def test_ask_rejects_invalid_mode(fake_openai, fake_es):
     assert result.exit_code == 2
     assert "telepathy" in result.stdout
     # Should hint at valid choices.
-    assert "vector" in result.stdout and "hybrid" in result.stdout
+    assert "vector" in result.stdout and "global" in result.stdout
 
 
 # ----- top_k passthrough ------------------------------------------------

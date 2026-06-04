@@ -172,6 +172,7 @@ def fake_openai(monkeypatch: pytest.MonkeyPatch) -> FakeOpenAI:
     monkeypatch.setattr("ragkit.core.graph.extractor.OpenAI", lambda **kw: instance)
     monkeypatch.setattr("ragkit.core.graph.summarizer.OpenAI", lambda **kw: instance)
     monkeypatch.setattr("ragkit.core.graph.description_merger.OpenAI", lambda **kw: instance)
+    monkeypatch.setattr("ragkit.core.graph.global_search.OpenAI", lambda **kw: instance)
     return instance
 
 
@@ -206,6 +207,7 @@ def fake_es(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     monkeypatch.setattr("ragkit.core.indexer.ESConnection", lambda: fake)
     monkeypatch.setattr("ragkit.core.kb_manager.ESConnection", lambda: fake)
     monkeypatch.setattr("ragkit.core.graph.es_indexer.ESConnection", lambda: fake)
+    monkeypatch.setattr("ragkit.core.graph.searcher.ESConnection", lambda: fake)
     return fake
 
 
