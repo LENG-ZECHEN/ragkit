@@ -122,6 +122,56 @@ def test_retrieve_global_empty_when_no_summaries(tmp_path):
     assert hits == []
 
 
+def test_retrieve_global_renders_structured_report(tmp_path):
+    """A community with title/summary/findings should render all three in
+    the hit content so the LLM sees the rich context (task #23)."""
+    from ragkit.core.graph.types import Finding
+    store = _make_populated_store(tmp_path)
+    store.set_communities([
+        Community(
+            id=0,
+            entity_names=["qwen", "dashscope", "alibaba"],
+            title="国产大模型生态",
+            summary="围绕通义千问及其托管平台的国产 LLM 生态系统。",
+            rank=8.0,
+            findings=[
+                Finding(summary="qwen 是阿里旗舰大模型", explanation="详细说明..."),
+                Finding(summary="DashScope 提供 API 访问", explanation="..."),
+            ],
+        )
+    ])
+    hits = retrieve_global("讲讲国产大模型", kb_name="t", store=store, top_k=1)
+
+    assert len(hits) == 1
+    content = hits[0].content
+    # All three parts of the structured report present
+    assert "国产大模型生态" in content       # title
+    assert "通义千问" in content              # summary
+    assert "qwen 是阿里旗舰大模型" in content  # finding
+    # Title surfaces in hit metadata as well
+    assert "国产大模型生态" in hits[0].title
+
+
+def test_retrieve_global_handles_legacy_summary_only(tmp_path):
+    """Old graphs (pre task #23) only have `summary`. Must still render
+    something usable for the LLM."""
+    store = _make_populated_store(tmp_path)
+    store.set_communities([
+        Community(
+            id=0,
+            entity_names=["qwen", "dashscope"],
+            summary="A legacy summary string.",
+            # title, findings all default-empty
+        )
+    ])
+    hits = retrieve_global("anything", kb_name="t", store=store, top_k=1)
+
+    assert len(hits) == 1
+    assert "A legacy summary string." in hits[0].content
+    # Title falls back to "Community {id}"
+    assert "Community 0" in hits[0].title
+
+
 # ----- hybrid retrieval -------------------------------------------------
 
 

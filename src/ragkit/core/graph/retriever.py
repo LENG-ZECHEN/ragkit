@@ -135,6 +135,35 @@ def retrieve_local(
     return hits[:top_k]
 
 
+_MAX_FINDINGS_IN_HIT = 3
+
+
+def _render_community_hit_content(community) -> str:
+    """Render a Community's structured report into a single passage the
+    LLM can consume.
+
+    Includes title, summary, and the top N findings (cap to keep prompts
+    short). Falls back gracefully when the report is incomplete (e.g.
+    legacy data with only ``summary``).
+    """
+    parts: list[str] = []
+    if community.title:
+        parts.append(community.title)
+    if community.summary:
+        parts.append(community.summary)
+    if community.findings:
+        lines = ["关键发现："]
+        for f in community.findings[:_MAX_FINDINGS_IN_HIT]:
+            head = f.summary.strip()
+            body = f.explanation.strip()
+            if head and body:
+                lines.append(f"- {head}: {body}")
+            elif head:
+                lines.append(f"- {head}")
+        parts.append("\n".join(lines))
+    return "\n".join(parts)
+
+
 def retrieve_global(
     question: str,
     kb_name: str,
@@ -142,31 +171,47 @@ def retrieve_global(
     top_k: int = 3,
     store: GraphStore | None = None,
 ) -> list[GraphHit]:
-    """Global retrieval — return the top community summaries.
+    """Global retrieval — return the top community reports.
 
-    For a true GraphRAG global pipeline, you'd score each summary against
-    the question; here we use a lightweight token-overlap proxy.
+    Uses a lightweight token-overlap proxy on title + summary. Once task
+    #24/#25 lands, this will be replaced by ES vector search.
     """
     _validate_args(question, kb_name)
     store = store or open_store(kb_name)
-    communities = [c for c in store.all_communities() if c.summary]
+    # A community is "globally retrievable" if it has any report content —
+    # title, summary, or findings.
+    communities = [
+        c for c in store.all_communities()
+        if c.summary or c.title or c.findings
+    ]
     if not communities:
         return []
 
     q_tokens = set(re.findall(r"\w+", question.lower()))
 
-    def score(summary: str) -> int:
-        s_tokens = set(re.findall(r"\w+", summary.lower()))
+    def score(community) -> int:
+        text = community.title + " " + community.summary
+        for f in community.findings:
+            text += " " + f.summary
+        s_tokens = set(re.findall(r"\w+", text.lower()))
         return len(q_tokens & s_tokens)
 
-    ranked = sorted(communities, key=lambda c: (score(c.summary), len(c.entity_names)), reverse=True)
+    ranked = sorted(
+        communities,
+        key=lambda c: (score(c), c.rank, len(c.entity_names)),
+        reverse=True,
+    )
     return [
         GraphHit(
             rank=i,
             kind="community",
-            title=f"Community {c.id} ({len(c.entity_names)} entities)",
-            content=c.summary,
-            extra={"entity_names": c.entity_names},
+            title=c.title or f"Community {c.id}",
+            content=_render_community_hit_content(c),
+            extra={
+                "entity_names": c.entity_names,
+                "level": c.level,
+                "rank": c.rank,
+            },
         )
         for i, c in enumerate(ranked[:top_k], start=1)
     ]

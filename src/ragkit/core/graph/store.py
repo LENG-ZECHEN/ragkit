@@ -16,7 +16,7 @@ from typing import Iterable
 
 import networkx as nx
 
-from ragkit.core.graph.types import Community, Entity, Relation
+from ragkit.core.graph.types import Community, Entity, Finding, Relation
 from ragkit.logger import logger
 
 
@@ -261,6 +261,18 @@ class NetworkXGraphStore(GraphStore):
                 summary=c.get("summary", ""),
                 level=c.get("level", 0),
                 extra=c.get("extra", {}),
+                # Newer fields — defaulted for backward compatibility with
+                # graphs saved before task #23.
+                title=c.get("title", ""),
+                rank=float(c.get("rank", 0.0)),
+                rank_explanation=c.get("rank_explanation", ""),
+                findings=[
+                    Finding(
+                        summary=f.get("summary", ""),
+                        explanation=f.get("explanation", ""),
+                    )
+                    for f in c.get("findings", [])
+                ],
             )
             for c in data.get("communities", [])
         ]
@@ -335,6 +347,14 @@ class NetworkXGraphStore(GraphStore):
             "summary": c.summary,
             "level": c.level,
             "extra": c.extra,
+            # Structured report fields (empty defaults for legacy data).
+            "title": c.title,
+            "rank": c.rank,
+            "rank_explanation": c.rank_explanation,
+            "findings": [
+                {"summary": f.summary, "explanation": f.explanation}
+                for f in c.findings
+            ],
         }
 
 

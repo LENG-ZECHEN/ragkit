@@ -117,7 +117,13 @@ def test_summarizer_preserves_all_communities_above_cap(tmp_path, fake_openai):
     from ragkit.core.graph.summarizer import summarize_all
     from ragkit.core.graph.types import Community, Relation
 
-    fake_openai.chat_script = [("content", "A short summary.")]
+    # Summarizer now expects structured JSON (task #23).
+    fake_openai.chat_script = [("content", json.dumps({
+        "title": "Pair",
+        "summary": "A short summary.",
+        "rank": 5,
+        "findings": [],
+    }))]
 
     store = NetworkXGraphStore(path=tmp_path / "g.json")
     store.upsert_relation(Relation(source="a", target="b"))
@@ -131,10 +137,11 @@ def test_summarizer_preserves_all_communities_above_cap(tmp_path, fake_openai):
 
     summarize_all(store, max_communities=1)
 
-    # All three communities still present (only the first got a summary).
+    # All three communities still present (only the first got a report).
     saved = store.all_communities()
     assert len(saved) == 3
     assert saved[0].summary  # got summarized
+    assert saved[0].title == "Pair"
     # The tail communities are still in the store (would have been deleted by the bug).
     assert saved[2].entity_names == ["e", "f"]
 

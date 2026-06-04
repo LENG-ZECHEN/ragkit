@@ -290,6 +290,52 @@ def test_graph_show_respects_depth_flag(tmp_path, monkeypatch):
 # ============================================================
 
 
+def test_graph_report_shows_structured_fields(tmp_path, monkeypatch):
+    """`rag graph report KB ID` prints title/summary/rank/findings."""
+    from ragkit.core.graph.types import Finding
+
+    monkeypatch.setenv("RAG_STORAGE_DIR", str(tmp_path))
+    path = tmp_path / "graphs" / "kb.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    store = NetworkXGraphStore(path=path)
+    store.upsert_entity(Entity(name="x", type="t"))
+    store.set_communities([
+        Community(
+            id=7,
+            entity_names=["x"],
+            title="THE_TITLE_MARKER",
+            summary="THE_SUMMARY_MARKER",
+            rank=6.5,
+            rank_explanation="THE_RANK_REASON",
+            findings=[
+                Finding(summary="FIND_SUMMARY_1", explanation="FIND_EXPLAIN_1"),
+            ],
+        )
+    ])
+    store.save()
+
+    result = runner.invoke(app, ["graph", "report", "kb", "7"])
+    assert result.exit_code == 0
+    assert "THE_TITLE_MARKER" in result.stdout
+    assert "THE_SUMMARY_MARKER" in result.stdout
+    assert "THE_RANK_REASON" in result.stdout
+    assert "FIND_SUMMARY_1" in result.stdout
+    assert "FIND_EXPLAIN_1" in result.stdout
+
+
+def test_graph_report_errors_when_id_not_found(tmp_path, monkeypatch):
+    """Unknown community ID must exit non-zero, not crash."""
+    monkeypatch.setenv("RAG_STORAGE_DIR", str(tmp_path))
+    path = tmp_path / "graphs" / "kb.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "entities": [], "relations": [], "communities": []
+    }))
+    result = runner.invoke(app, ["graph", "report", "kb", "999"])
+    assert result.exit_code != 0
+
+
 def test_graph_clear_aborts_when_user_declines(tmp_path, monkeypatch):
     """Without --yes, typing 'n' must NOT delete the graph file."""
     monkeypatch.setenv("RAG_STORAGE_DIR", str(tmp_path))

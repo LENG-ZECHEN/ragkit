@@ -45,6 +45,7 @@ kb_app.command("delete", help="Delete a knowledge base.")(commands.cmd_kb_delete
 graph_app.command("build", help="Build a knowledge graph from an indexed KB.")(graph_cmd.cmd_graph_build)
 graph_app.command("info", help="Show graph stats for a KB.")(graph_cmd.cmd_graph_info)
 graph_app.command("show", help="Show one entity and its neighborhood.")(graph_cmd.cmd_graph_show)
+graph_app.command("report", help="Print structured report for one community.")(graph_cmd.cmd_graph_report)
 graph_app.command("clear", help="Delete the graph file for a KB.")(graph_cmd.cmd_graph_clear)
 
 

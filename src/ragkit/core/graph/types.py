@@ -65,11 +65,35 @@ class Relation:
 
 
 @dataclass
+class Finding:
+    """One key fact discovered about a community.
+
+    Findings are surfaced individually so the global retriever can show
+    them as bullet points to the LLM, instead of burying them in one
+    long summary paragraph.
+    """
+
+    summary: str        # one-line conclusion
+    explanation: str    # detail (~50-100 chars)
+
+
+@dataclass
 class Community:
-    """A cluster of entities discovered by community detection."""
+    """A cluster of entities discovered by community detection.
+
+    Now carries a structured "report" (title + summary + rank + findings)
+    in addition to the legacy ``summary`` field, mirroring Microsoft
+    GraphRAG's community report output.
+    """
 
     id: int
     entity_names: list[str]
-    summary: str = ""
-    level: int = 0  # 0 for now; reserved for hierarchical communities later
+    summary: str = ""  # legacy single-string summary, kept for back-compat
+    level: int = 0
     extra: dict[str, Any] = field(default_factory=dict)
+    # Structured report fields (filled by summarizer; default empties so
+    # old JSON files still load cleanly).
+    title: str = ""
+    rank: float = 0.0
+    rank_explanation: str = ""
+    findings: list[Finding] = field(default_factory=list)

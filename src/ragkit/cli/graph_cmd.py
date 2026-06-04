@@ -184,6 +184,47 @@ def cmd_graph_show(
     console.print(t)
 
 
+def cmd_graph_report(
+    kb: str = typer.Argument(..., help="Knowledge base name."),
+    community_id: int = typer.Argument(..., help="Community ID to inspect."),
+) -> None:
+    """Print the structured report for one community (task #23).
+
+    Shows title, summary, rank, rank_explanation, and all findings.
+    Use this to inspect what the LLM produced for a specific cluster.
+    """
+    from ragkit.core.graph.store import open_store
+
+    store = open_store(kb)
+    matching = [c for c in store.all_communities() if c.id == community_id]
+    if not matching:
+        error(f"No community with id={community_id} in graph for '{kb}'")
+        raise typer.Exit(code=1)
+    c = matching[0]
+
+    console.print(kv_table(
+        f"Community {c.id} (level {c.level})",
+        [
+            ("Title", c.title or "(empty)"),
+            ("Rank", f"{c.rank:.1f}"),
+            ("Rank reason", c.rank_explanation or "(empty)"),
+            ("Entities", f"{len(c.entity_names)}"),
+            ("Findings", f"{len(c.findings)}"),
+        ],
+    ))
+
+    if c.summary:
+        console.print("\n[bold]Summary[/bold]")
+        console.print(c.summary)
+
+    if c.findings:
+        console.print("\n[bold]Findings[/bold]")
+        for i, f in enumerate(c.findings, start=1):
+            console.print(f"  [cyan]{i}.[/cyan] [bold]{f.summary}[/bold]")
+            if f.explanation:
+                console.print(f"     {f.explanation}")
+
+
 def cmd_graph_clear(
     kb: str = typer.Argument(..., help="Knowledge base name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),

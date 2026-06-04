@@ -11,6 +11,6 @@ Module layout (each file owns ONE concern — easy to swap):
     retriever.py    Local / global / hybrid query strategies
 """
 
-from ragkit.core.graph.types import Community, Entity, Relation
+from ragkit.core.graph.types import Community, Entity, Finding, Relation
 
-__all__ = ["Entity", "Relation", "Community"]
+__all__ = ["Entity", "Relation", "Community", "Finding"]
