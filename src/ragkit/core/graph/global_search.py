@@ -256,6 +256,8 @@ def run_global_search(
         List of RatedPoint, sorted by rating desc, ready for the generator
         to compose into the final answer.
     """
+    from ragkit.cli import observe
+
     if not community_reports:
         return []
 
@@ -265,15 +267,23 @@ def run_global_search(
 
     # 2) Pack into batches under the token budget.
     batches = _batch_by_token_count(shuffled, max_tokens=max_tokens_per_batch)
+    observe.trace_global_batches(
+        [len(b) for b in batches],
+        [sum(_estimate_tokens(_format_report_for_batch(r)) for r in b) for b in batches],
+    )
 
     # 3) MAP: per-batch LLM scoring.
     all_points: list[RatedPoint] = []
-    for batch in batches:
-        all_points.extend(_map_rate_batch(question, batch))
+    for i, batch in enumerate(batches, start=1):
+        rir = _map_rate_batch(question, batch)
+        observe.trace_global_map_batch(i, len(batch), rir)
+        all_points.extend(rir)
 
     # 4) REDUCE: filter + top-K.
-    return _reduce_rated_points(
+    final = _reduce_rated_points(
         all_points,
         threshold=rating_threshold,
         top_k=final_top_k,
     )
+    observe.trace_global_reduce(len(all_points), len(final), rating_threshold)
+    return final

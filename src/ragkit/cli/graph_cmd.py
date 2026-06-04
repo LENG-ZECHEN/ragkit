@@ -24,13 +24,22 @@ def cmd_graph_build(
         "--max-consolidations",
         help="Cap on consolidation LLM calls per build.",
     ),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help="Trace per-chunk extraction yield, consolidation diffs, community report stats.",
+    ),
 ) -> None:
     """Build a knowledge graph from an already-indexed KB.
 
     Reads chunks back from Elasticsearch and runs entity/relation extraction.
     """
+    from ragkit.cli import observe
     from ragkit.core.graph.builder import build_graph
     from ragkit.core.rag.utils.es_conn import ESConnection
+
+    if debug:
+        observe.enable_debug()
 
     if not kb or not kb.strip():
         error("--kb must be a non-empty knowledge base name")

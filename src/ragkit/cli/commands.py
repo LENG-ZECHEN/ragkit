@@ -22,10 +22,19 @@ def cmd_index(
         "--build-graph",
         help="Also extract entities/relations and build a knowledge graph (slow — one LLM call per chunk).",
     ),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help="Enable pipeline tracing (per-chunk extraction, dendrogram details, ES indexing stats, ...).",
+    ),
 ) -> None:
     """Parse, chunk, embed and index a file or directory into a knowledge base."""
+    from ragkit.cli import observe
     from ragkit.core.chunker import is_supported
     from ragkit.core.indexer import index_file
+
+    if debug:
+        observe.enable_debug()
 
     if path.is_dir():
         pattern = "**/*" if recursive else "*"
@@ -94,6 +103,12 @@ def cmd_ask(
     ),
     show_thinking: bool = typer.Option(False, "--thinking", help="Stream the LLM's reasoning trace."),
     as_json: bool = typer.Option(False, "--json", help="Emit structured JSON to stdout."),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help="Show internal pipeline trace (query rewriting, kNN candidates, "
+             "map/reduce intermediates, ...). For tuning + debugging.",
+    ),
 ) -> None:
     """Ask a single question. Streams the answer to stdout, then prints citations.
 
@@ -103,8 +118,12 @@ def cmd_ask(
                 community reports, neighbor entities, relations)
       global  — Map-Reduce over community reports (best for thematic queries)
     """
+    from ragkit.cli import observe
     from ragkit.core.generator import generate
     from ragkit.core.retriever import retrieve
+
+    if debug:
+        observe.enable_debug()
 
     valid_modes = {"vector", "local", "global"}
     if mode not in valid_modes:
@@ -161,22 +180,38 @@ def cmd_ask(
     console.print()
     if chunks:
         console.print()
-        table = Table(title="References", show_lines=False, border_style="dim")
-        table.add_column("#", style="cyan", no_wrap=True)
-        table.add_column("Document")
-        table.add_column("Similarity", justify="right")
-        for c in chunks:
-            table.add_row(str(c.rank), c.document_name, f"{c.similarity:.3f}")
-        console.print(table)
+        if mode == "vector":
+            # Vector mode — simple Document/Similarity table.
+            table = Table(title="References", show_lines=False, border_style="dim")
+            table.add_column("#", style="cyan", no_wrap=True)
+            table.add_column("Document")
+            table.add_column("Similarity", justify="right")
+            for c in chunks:
+                table.add_row(str(c.rank), c.document_name, f"{c.similarity:.3f}")
+            console.print(table)
+        else:
+            # local / global — use the kind-aware table from observe so users
+            # see which stream each hit came from.
+            # `hits` (GraphHit list) is in scope from above.
+            console.print(observe.references_table_with_kind(hits))
 
 
 def cmd_retrieve(
     question: str = typer.Argument(..., help="Question to retrieve for."),
     kb: str = typer.Option("default", "--kb", "-k", help="Knowledge base name."),
     top_k: int = typer.Option(5, "--top-k", help="Top chunks to retrieve."),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help="Show query rewriting trace, ES candidates count, rerank timing, ...",
+    ),
 ) -> None:
     """Run retrieval only (no LLM call) — useful for tuning."""
+    from ragkit.cli import observe
     from ragkit.core.retriever import retrieve
+
+    if debug:
+        observe.enable_debug()
 
     chunks = retrieve(question, kb_name=kb, top_k=top_k)
     if not chunks:

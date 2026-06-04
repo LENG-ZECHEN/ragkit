@@ -50,6 +50,8 @@ def build_graph(
         logger.warning("No chunks given to build_graph")
         return store
 
+    from ragkit.cli import observe
+
     # ---- 1. extract entities + relations per chunk -------------------
     extraction_failures = 0
     for i, chunk in enumerate(chunks, start=1):
@@ -58,6 +60,7 @@ def build_graph(
         text = chunk.get("content_with_weight", "")
         chunk_id = str(chunk.get("id", f"chunk-{i}"))
         result = extract_from_text(text, chunk_id)
+        observe.trace_chunk_extraction(chunk_id, len(result.entities), len(result.relations))
         for entity in result.entities:
             store.upsert_entity(entity)
         for relation in result.relations:
@@ -83,11 +86,12 @@ def build_graph(
 
     # ---- 1.5. description consolidation (LLM rewrite of long descriptions) ----
     if consolidate_descriptions:
-        consolidate_all(
+        result_consolidation = consolidate_all(
             store,
             max_calls=max_consolidation_calls,
             progress_cb=progress_cb,
         )
+        observe.trace_consolidation_summary(result_consolidation)
 
     # ---- 2. community detection --------------------------------------
     if isinstance(store, NetworkXGraphStore):
@@ -95,6 +99,11 @@ def build_graph(
             progress_cb("clustering", 1, 1)
         communities = detect_communities(store)
         store.set_communities(communities)
+        # Default-mode: surface the hierarchical structure (always visible).
+        level_counts: dict[int, int] = {}
+        for c in communities:
+            level_counts[c.level] = level_counts.get(c.level, 0) + 1
+        observe.show_dendrogram_structure(level_counts)
 
     # ---- 3. community summaries (progress now reflects real work) ----
     if summarize and store.all_communities():
@@ -103,13 +112,17 @@ def build_graph(
             max_communities=max_summary_communities,
             progress_cb=progress_cb,
         )
+        # Debug-mode trace: per-community report stats
+        for c in store.all_communities()[:max_summary_communities or len(store.all_communities())]:
+            observe.trace_community_summary_result(c.id, c.title, c.rank, len(c.findings))
 
     store.save()
 
     # ---- 4. ES indexing of graph artifacts (task #24) ----------------
     if index_to_es:
         try:
-            index_graph_to_es(store, kb_name, progress_cb=progress_cb)
+            es_stats = index_graph_to_es(store, kb_name, progress_cb=progress_cb)
+            observe.show_es_graph_indexing(es_stats)
         except Exception as e:
             # ES indexing failures shouldn't lose the JSON graph (already
             # saved above). Log loudly so the user knows graph retrieval

@@ -63,17 +63,23 @@ def retrieve(
     if not question.strip():
         raise ValueError("question must be a non-empty string")
 
+    # Observability — no-ops unless observe.enable_debug() was called.
+    from ragkit.cli import observe
+
     dealer = _get_dealer()
-    raw = dealer.retrieval(
-        question=question,
-        embd_mdl=None,
-        tenant_ids=kb_name,
-        kb_ids=None,
-        page=1,
-        page_size=top_k,
-        similarity_threshold=similarity_threshold,
-        vector_similarity_weight=vector_similarity_weight,
-    )
+    observe.trace_query_rewriting(question, dealer.qryr)
+
+    with observe.timed("vector pipeline (ES + rerank)"):
+        raw = dealer.retrieval(
+            question=question,
+            embd_mdl=None,
+            tenant_ids=kb_name,
+            kb_ids=None,
+            page=1,
+            page_size=top_k,
+            similarity_threshold=similarity_threshold,
+            vector_similarity_weight=vector_similarity_weight,
+        )
 
     out: list[RetrievedChunk] = []
     for i, chunk in enumerate(raw.get("chunks", []), start=1):
@@ -91,4 +97,7 @@ def retrieve(
                 term_similarity=float(chunk.get("term_similarity", 0.0)),
             )
         )
+
+    observe.trace_vector_retrieval_summary(int(raw.get("total", 0)), len(out))
+    observe.trace_final_topk_scores(out)
     return out

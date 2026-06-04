@@ -70,6 +70,11 @@ def index_file(
         progress_cb("parsing", 0.1)
 
     chunks = chunk_file(path)
+
+    # Default-mode visibility: surface chunk count right after parse.
+    from ragkit.cli import observe
+    observe.show_chunks_produced(path.name, len(chunks))
+
     if not chunks:
         logger.warning(f"No chunks produced from {path}")
         return {"file": path.name, "chunks": 0, "kb": kb_name}

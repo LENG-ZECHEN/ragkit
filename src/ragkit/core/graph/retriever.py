@@ -267,26 +267,37 @@ def retrieve_local(
     Returns a single flat GraphHit list, grouped by stream (chunks first,
     then communities, neighbors, relations), with re-numbered global ranks.
     """
+    from ragkit.cli import observe
+
     _validate_args(question, kb_name)
     store = store or open_store(kb_name)
 
     # ---- 1. Find seed entities via vector search ----
-    seed_docs = search_entities_by_vector(
-        kb_name, question, top_k=LOCAL_TOP_K_SEEDS
-    )
+    with observe.timed("local · seed entity kNN"):
+        seed_docs = search_entities_by_vector(
+            kb_name, question, top_k=LOCAL_TOP_K_SEEDS
+        )
     if not seed_docs:
         logger.info(f"Local search: no seed entities found for query in {kb_name}_graph")
         return []
+    observe.trace_seed_entities(seed_docs)
 
     # ---- 2. Multi-source candidate collection ----
     text_units = _collect_text_units(seed_docs, kb_name, top_k=min(top_k, LOCAL_TOP_K_TEXT_UNITS))
+    observe.trace_stream_summary("text units", text_units)
+
     communities = _collect_communities(seed_docs, kb_name, top_k=min(top_k, LOCAL_TOP_K_COMMUNITIES))
+    observe.trace_stream_summary("communities", communities)
+
     neighbors = _collect_neighbor_entities(seed_docs, store, top_k=LOCAL_TOP_K_ENTITIES)
+    observe.trace_stream_summary("neighbor entities", neighbors)
+
     relations = _collect_relations(seed_docs, store, top_k=LOCAL_TOP_K_RELATIONS)
+    observe.trace_stream_summary("relations", relations)
 
     # ---- 3. Concatenate streams with renumbered ranks ----
     all_hits = text_units + communities + neighbors + relations
-    return [
+    result = [
         GraphHit(
             rank=i,
             kind=h.kind,
@@ -296,6 +307,8 @@ def retrieve_local(
         )
         for i, h in enumerate(all_hits, start=1)
     ]
+    observe.show_retrieval_kind_breakdown(result)
+    return result
 
 
 # ==========================================================================
@@ -325,18 +338,23 @@ def retrieve_global(
       2. run_global_search performs Map-Reduce → list[RatedPoint]
       3. Wrap surviving points as GraphHit
     """
+    from ragkit.cli import observe
+
     _validate_args(question, kb_name)
 
     # 1. Candidate community reports.
-    community_docs = search_communities_by_vector(
-        kb_name, question, level=level, top_k=GLOBAL_TOP_K_REPORTS
-    )
+    with observe.timed("global · community kNN"):
+        community_docs = search_communities_by_vector(
+            kb_name, question, level=level, top_k=GLOBAL_TOP_K_REPORTS
+        )
     if not community_docs:
         logger.info(f"Global search: no community reports for query in {kb_name}_graph")
         return []
+    observe.trace_global_candidates(community_docs)
 
     # 2. Map-Reduce.
-    rated_points = run_global_search(question, community_docs, final_top_k=top_k)
+    with observe.timed("global · map-reduce"):
+        rated_points = run_global_search(question, community_docs, final_top_k=top_k)
     if not rated_points:
         return []
 
