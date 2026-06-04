@@ -1,9 +1,27 @@
-"""REPL state machine — slash commands users actually type."""
+"""REPL state machine — slash commands users actually type.
+
+Phase A (task #27) added /mode, /level, /debug and made ReplState carry
+mode/debug/level fields. The tests below cover both the original
+commands and the new ones.
+"""
 
 from __future__ import annotations
 
-from ragkit.cli.repl import ReplState, _handle_command
+from ragkit.cli import observe
+from ragkit.cli.repl import HELP_TEXT, VALID_MODES, ReplState, _handle_command
 from ragkit.core.retriever import RetrievedChunk
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def reset_observe_state():
+    """Each test starts with observe debug OFF — /debug toggles can leak
+    between tests otherwise."""
+    observe.disable_debug()
+    yield
+    observe.disable_debug()
 
 
 def _state(**overrides) -> ReplState:
@@ -108,3 +126,146 @@ def test_state_is_immutable_on_no_op_commands():
     after_help = _handle_command("/help", s)
     assert after_help.kb == "finance"
     assert after_help.top_k == 7
+
+
+# ==========================================================================
+# /mode command (task #27)
+# ==========================================================================
+
+
+def test_mode_default_is_vector():
+    """ReplState's default mode must be vector — the safest choice."""
+    s = ReplState(kb="x", top_k=5, show_thinking=False, last_chunks=[])
+    assert s.mode == "vector"
+
+
+def test_mode_accepts_each_valid_value():
+    """Each of vector/local/global must be settable."""
+    s = _state()
+    for valid in VALID_MODES:
+        new = _handle_command(f"/mode {valid}", s)
+        assert new is not None
+        assert new.mode == valid
+
+
+def test_mode_rejects_invalid_value():
+    s = _state(mode="vector")
+    new = _handle_command("/mode telepathy", s)
+    # State must be unchanged on rejection.
+    assert new.mode == "vector"
+
+
+def test_mode_rejects_missing_arg():
+    s = _state(mode="vector")
+    new = _handle_command("/mode", s)
+    assert new.mode == "vector"
+
+
+def test_mode_leaving_global_clears_level():
+    """A level filter only makes sense for global mode; switching away
+    must clear it so a later /mode global doesn't carry stale state."""
+    s = _state(mode="global", level=2)
+    new = _handle_command("/mode vector", s)
+    assert new.mode == "vector"
+    assert new.level is None
+
+
+def test_mode_within_global_keeps_level():
+    """Setting mode to global again shouldn't drop the level."""
+    s = _state(mode="global", level=2)
+    new = _handle_command("/mode global", s)
+    assert new.level == 2
+
+
+# ==========================================================================
+# /level command
+# ==========================================================================
+
+
+def test_level_default_is_none():
+    s = ReplState(kb="x", top_k=5, show_thinking=False, last_chunks=[])
+    assert s.level is None
+
+
+def test_level_accepts_non_negative_integer():
+    s = _state(mode="global")
+    new = _handle_command("/level 2", s)
+    assert new.level == 2
+
+
+def test_level_none_clears():
+    s = _state(mode="global", level=2)
+    new = _handle_command("/level none", s)
+    assert new.level is None
+
+
+def test_level_zero_clears():
+    """`/level 0` and `/level none` both treated as 'no filter' — 0 is
+    treated as the sentinel here, not as 'coarsest level'. We use None
+    for 'unset' to avoid confusion with level=0=coarsest."""
+    s = _state(mode="global", level=5)
+    new = _handle_command("/level 0", s)
+    assert new.level is None
+
+
+def test_level_rejects_negative():
+    s = _state(mode="global", level=2)
+    new = _handle_command("/level -3", s)
+    # Reject silently (warning printed but state unchanged).
+    assert new.level == 2
+
+
+def test_level_in_non_global_mode_still_sets_but_warns():
+    """Setting level outside global mode is allowed (user may switch later)
+    but should warn — we don't crash."""
+    s = _state(mode="vector", level=None)
+    new = _handle_command("/level 1", s)
+    assert new.level == 1
+    # Mode should not have been changed.
+    assert new.mode == "vector"
+
+
+# ==========================================================================
+# /debug command
+# ==========================================================================
+
+
+def test_debug_default_off():
+    s = ReplState(kb="x", top_k=5, show_thinking=False, last_chunks=[])
+    assert s.debug is False
+    assert observe.is_debug() is False
+
+
+def test_debug_toggle_syncs_observe():
+    """/debug must keep ReplState and observe module in sync."""
+    s = _state(debug=False)
+    new = _handle_command("/debug", s)
+    assert new.debug is True
+    assert observe.is_debug() is True
+
+    # Toggle off
+    new2 = _handle_command("/debug", new)
+    assert new2.debug is False
+    assert observe.is_debug() is False
+
+
+def test_debug_toggle_idempotent_via_repeated_invocations():
+    """Two toggles return us to the original state."""
+    s = _state(debug=False)
+    after_two = _handle_command("/debug", _handle_command("/debug", s))
+    assert after_two.debug is False
+    assert observe.is_debug() is False
+
+
+# ==========================================================================
+# HELP_TEXT covers the new commands
+# ==========================================================================
+
+
+def test_help_text_lists_all_commands():
+    """If we add a slash command, the help text must mention it. This
+    test is a cheap forcing function to keep help in sync."""
+    expected_in_help = ["/kb", "/mode", "/level", "/top", "/thinking",
+                        "/debug", "/show", "/clear", "/help", "/exit"]
+    for cmd in expected_in_help:
+        assert cmd in HELP_TEXT, f"{cmd} missing from HELP_TEXT"
