@@ -20,7 +20,7 @@ _MAX_BATCH = 10
 def _client() -> OpenAI:
     cfg = get_config()
     cfg.require_api_key()
-    return OpenAI(api_key=cfg.dashscope_api_key, base_url=cfg.dashscope_base_url)
+    return OpenAI(api_key=cfg.dashscope_api_key, base_url=cfg.dashscope_base_url, timeout=cfg.llm_timeout)
 
 
 def embed_one(text: str) -> list[float]:

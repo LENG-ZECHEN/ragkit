@@ -28,6 +28,10 @@ class Config:
     embedding_model: str
     embedding_dim: int
 
+    # Per-request timeout for all OpenAI-compatible client calls (seconds).
+    # Without this the SDK default is ~10min — bad for stuck upstreams.
+    llm_timeout: int
+
     # Elasticsearch
     es_host: str
     es_user: str
@@ -47,6 +51,7 @@ class Config:
             llm_model=os.getenv("RAG_LLM_MODEL", "qwen-plus"),
             embedding_model=os.getenv("RAG_EMBEDDING_MODEL", "text-embedding-v3"),
             embedding_dim=int(os.getenv("RAG_EMBEDDING_DIM", "1024")),
+            llm_timeout=int(os.getenv("RAG_LLM_TIMEOUT", "60")),
             es_host=os.getenv("ES_HOST", "http://localhost:9200"),
             es_user=os.getenv("ES_USER", "elastic"),
             es_password=os.getenv("ES_PASSWORD", "infini_rag_flow"),

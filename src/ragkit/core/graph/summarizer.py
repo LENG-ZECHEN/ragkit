@@ -67,7 +67,7 @@ SUMMARY_PROMPT = """\
 def _client() -> OpenAI:
     cfg = get_config()
     cfg.require_api_key()
-    return OpenAI(api_key=cfg.dashscope_api_key, base_url=cfg.dashscope_base_url)
+    return OpenAI(api_key=cfg.dashscope_api_key, base_url=cfg.dashscope_base_url, timeout=cfg.llm_timeout)
 
 
 def _strip_code_fence(text: str) -> str:

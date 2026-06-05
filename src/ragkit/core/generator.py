@@ -76,7 +76,7 @@ def generate(
     prompt = build_prompt(question, chunks)
     logger.debug(f"Prompt length: {len(prompt)} chars")
 
-    client = OpenAI(api_key=cfg.dashscope_api_key, base_url=cfg.dashscope_base_url)
+    client = OpenAI(api_key=cfg.dashscope_api_key, base_url=cfg.dashscope_base_url, timeout=cfg.llm_timeout)
 
     try:
         stream = client.chat.completions.create(

@@ -272,34 +272,49 @@ def cmd_kb_info(
 def cmd_kb_delete(
     name: str = typer.Argument(..., help="Knowledge base name to delete."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+    keep_graph: bool = typer.Option(
+        False,
+        "--keep-graph",
+        help="Keep the companion graph (ES {name}_graph index + storage/graphs/"
+             "{name}.json). Default: delete the graph too.",
+    ),
 ) -> None:
     """Delete a knowledge base. Irreversible.
 
-    Also removes the companion {name}_graph index if it exists (avoids
-    orphan graph data after the chunk index is gone).
+    By default this deletes BOTH the chunk index ({name}) AND its companion
+    graph layer (ES {name}_graph index + storage/graphs/{name}.json). Pass
+    --keep-graph to drop only the chunks and leave the graph in place.
     """
     validate_kb_name(name)
     from ragkit.core.kb_manager import delete_kb
     from ragkit.core._ragflow.rag.utils.es_conn import ESConnection
 
     if not yes:
-        confirm = typer.confirm(f"Delete knowledge base '{name}'? This cannot be undone.")
+        what = "knowledge base" if keep_graph else "knowledge base + graph"
+        confirm = typer.confirm(f"Delete {what} '{name}'? This cannot be undone.")
         if not confirm:
             info("Cancelled.")
             return
 
     deleted = delete_kb(name)
 
-    # Also drop the graph companion index — best-effort, may not exist.
-    # ISS-022: surface failures at warn level instead of silent except, so a
-    # connection / permission issue is visible. Matches graph_cmd.py policy.
-    try:
-        ESConnection().delete_index(f"{name}_graph")
-    except Exception as e:
-        warn(f"Could not delete companion graph index '{name}_graph': {e}")
+    if not keep_graph:
+        # Drop the graph companion ES index — best-effort, may not exist.
+        # ISS-022: surface failures at warn level instead of silent except.
+        try:
+            ESConnection().delete_index(f"{name}_graph")
+        except Exception as e:
+            warn(f"Could not delete companion graph index '{name}_graph': {e}")
+
+        # Drop the graph JSON file too (this was previously orphaned).
+        from ragkit.core.graph.store import open_store
+        try:
+            open_store(name).clear()
+        except Exception as e:
+            warn(f"Could not delete graph file for '{name}': {e}")
 
     if deleted:
-        success(f"Deleted '{name}'")
+        success(f"Deleted '{name}'" + (" (graph preserved)" if keep_graph else " (incl. graph)"))
     else:
         warn(f"'{name}' did not exist")
 
