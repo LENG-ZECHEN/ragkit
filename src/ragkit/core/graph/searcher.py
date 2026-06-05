@@ -41,6 +41,13 @@ def search_entities_by_vector(
         return []
 
     query_vector = embed_one(query_text)
+    # ISS-016: surface embedding failures instead of silently returning [].
+    if not query_vector:
+        logger.warning(
+            "search_entities_by_vector: embed_one returned an empty vector "
+            "(API error or rate-limited). Returning no results."
+        )
+        return []
     field = _vector_field_name(len(query_vector))
 
     try:
@@ -80,6 +87,13 @@ def search_communities_by_vector(
         return []
 
     query_vector = embed_one(query_text)
+    # ISS-016: surface embedding failures instead of silently returning [].
+    if not query_vector:
+        logger.warning(
+            "search_communities_by_vector: embed_one returned an empty vector. "
+            "Returning no results."
+        )
+        return []
     field = _vector_field_name(len(query_vector))
 
     # Filter combines type AND optional level.
@@ -162,7 +176,10 @@ def fetch_chunks_by_ids(kb_name: str, chunk_ids: list[str]) -> list[dict[str, An
         return []
 
     try:
-        resp = es.mget(index=kb_name, ids=list(set(chunk_ids)))
+        # ISS-037: preserve order while deduplicating. set() would randomize.
+        # dict.fromkeys keeps first-occurrence order (Py 3.7+ insertion order).
+        unique_ids = list(dict.fromkeys(chunk_ids))
+        resp = es.mget(index=kb_name, ids=unique_ids)
     except Exception as e:
         logger.warning(f"fetch_chunks_by_ids failed on {kb_name}: {e}")
         return []

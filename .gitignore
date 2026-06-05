@@ -62,3 +62,9 @@ tests/_artifacts/
 # Pip
 pip-log.txt
 pip-delete-this-directory.txt
+
+# Session-generated reports / user guides (kept locally, not committed)
+PROJECT_CAPABILITY_REPORT.md
+PROJECT_CAPABILITY_REPORT_zh.md
+USER_GUIDE.md
+USER_GUIDE_zh.md

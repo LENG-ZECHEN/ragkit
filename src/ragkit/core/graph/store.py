@@ -254,28 +254,42 @@ class NetworkXGraphStore(GraphStore):
                 "weight": float(r.get("weight", 1.0)),
                 "source_chunks": r.get("source_chunks", []),
             })
-        self.communities = [
-            Community(
-                id=c["id"],
-                entity_names=c["entity_names"],
-                summary=c.get("summary", ""),
-                level=c.get("level", 0),
-                extra=c.get("extra", {}),
+        # ISS-014: tolerate partially-corrupt community entries. Earlier code
+        # used bracket access on 'id' and 'entity_names', which would crash
+        # the WHOLE load (entities + relations included) if a single community
+        # entry was malformed. Now we use .get() with defaults like the other
+        # fields, so a bad community gets degenerate values but the rest of
+        # the graph still loads.
+        loaded_communities: list[Community] = []
+        for i, c in enumerate(data.get("communities", [])):
+            if not isinstance(c, dict):
+                logger.warning(f"Skipping non-dict community at index {i}")
+                continue
+            try:
+                loaded_communities.append(Community(
+                    id=int(c.get("id", i)),
+                    entity_names=list(c.get("entity_names", []) or []),
+                    summary=c.get("summary", ""),
+                    level=int(c.get("level", 0)),
+                    extra=c.get("extra", {}) or {},
                 # Newer fields — defaulted for backward compatibility with
                 # graphs saved before task #23.
-                title=c.get("title", ""),
-                rank=float(c.get("rank", 0.0)),
-                rank_explanation=c.get("rank_explanation", ""),
-                findings=[
-                    Finding(
-                        summary=f.get("summary", ""),
-                        explanation=f.get("explanation", ""),
-                    )
-                    for f in c.get("findings", [])
-                ],
-            )
-            for c in data.get("communities", [])
-        ]
+                    title=c.get("title", ""),
+                    rank=float(c.get("rank", 0.0)),
+                    rank_explanation=c.get("rank_explanation", ""),
+                    findings=[
+                        Finding(
+                            summary=f.get("summary", ""),
+                            explanation=f.get("explanation", ""),
+                        )
+                        for f in (c.get("findings", []) or [])
+                        if isinstance(f, dict)
+                    ],
+                ))
+            except (TypeError, ValueError) as e:
+                logger.warning(f"Skipping malformed community at index {i}: {e}")
+                continue
+        self.communities = loaded_communities
 
     def clear(self) -> None:
         self.g.clear()

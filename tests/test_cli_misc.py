@@ -205,10 +205,15 @@ def test_graph_build_passes_summarize_flag(tmp_path, fake_openai, fake_es, monke
 
     captured: dict = {}
 
-    def fake_build(chunks, kb_name, *, summarize, max_summary_communities, progress_cb=None, **kw):
+    def fake_build(chunks, kb_name, *, summarize, max_summary_communities,
+                   consolidate_descriptions=True, max_consolidation_calls=20,
+                   progress_cb=None, **kw):
+        # ISS-011: also capture consolidation kwargs so the test catches a
+        # broken --no-consolidate / --max-consolidations flag mapping.
         captured["summarize"] = summarize
         captured["max"] = max_summary_communities
-        # Return a store-like object the CLI can call .entity_count() etc on.
+        captured["consolidate"] = consolidate_descriptions
+        captured["max_consolidations"] = max_consolidation_calls
         store = NetworkXGraphStore(path=tmp_path / "g.json")
         store.upsert_entity(Entity(name="alice", type="person"))
         return store
@@ -221,6 +226,41 @@ def test_graph_build_passes_summarize_flag(tmp_path, fake_openai, fake_es, monke
 
     runner.invoke(app, ["graph", "build", "--kb", "kb", "--max-summaries", "7"])
     assert captured["max"] == 7
+
+    # ISS-011: --no-consolidate and --max-consolidations propagate
+    runner.invoke(app, ["graph", "build", "--kb", "kb", "--no-consolidate"])
+    assert captured["consolidate"] is False
+
+    runner.invoke(app, ["graph", "build", "--kb", "kb", "--max-consolidations", "5"])
+    assert captured["max_consolidations"] == 5
+
+
+def test_graph_build_debug_flag_enables_observe(tmp_path, fake_openai, fake_es, monkeypatch):
+    """ISS-011: `rag graph build --debug` must call observe.enable_debug()
+    so the trace_xxx() calls inside the build pipeline actually emit output."""
+    from ragkit.cli import observe
+
+    fake_es.es.indices.exists.return_value = True
+    fake_es.es.search.return_value = {
+        "hits": {"hits": [{"_id": "c1", "_source": {"content_with_weight": "x"}}]},
+        "_scroll_id": "sid",
+    }
+    fake_es.es.scroll.return_value = {"hits": {"hits": []}, "_scroll_id": "sid"}
+
+    def fake_build(chunks, kb_name, **kw):
+        store = NetworkXGraphStore(path=tmp_path / "g.json")
+        store.upsert_entity(Entity(name="x", type="t"))
+        return store
+
+    monkeypatch.setattr("ragkit.core.graph.builder.build_graph", fake_build)
+    # Always start from a clean state — observe is module-global.
+    observe.disable_debug()
+    try:
+        result = runner.invoke(app, ["graph", "build", "--kb", "kb", "--debug"])
+        assert result.exit_code == 0
+        assert observe.is_debug() is True
+    finally:
+        observe.disable_debug()
 
 
 # ============================================================

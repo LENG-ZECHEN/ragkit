@@ -239,15 +239,21 @@ def test_fetch_existing_hashes_walks_scroll_pages():
 
 
 def test_delete_community_docs_targets_only_community_type():
-    """The delete_by_query body must filter type_kwd=community AND kb_id."""
+    """The delete_by_query body must filter type_kwd=community AND kb_id.
+
+    Updated for ISS-015: we now pass modern elasticsearch-py 8.x kwargs
+    (query=... directly) instead of the deprecated body={query: ...}.
+    """
     fake_raw = MagicMock()
     fake_raw.indices.exists.return_value = True
 
     _delete_community_docs("kb1", fake_raw)
 
     call = fake_raw.delete_by_query.call_args
-    body = call.kwargs.get("body") or call.args[1] if call.args else call.kwargs["body"]
-    must = body["query"]["bool"]["must"]
+    # Accept both modern kwarg style and legacy body= style.
+    query = call.kwargs.get("query") or (call.kwargs.get("body") or {}).get("query")
+    assert query is not None, f"No query found in delete_by_query call: {call.kwargs}"
+    must = query["bool"]["must"]
     types = [m["term"].get("type_kwd") for m in must if "type_kwd" in m["term"]]
     kbs = [m["term"].get("kb_id") for m in must if "kb_id" in m["term"]]
     assert "community" in types

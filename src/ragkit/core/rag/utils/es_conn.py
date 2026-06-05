@@ -54,9 +54,24 @@ class ESConnection():
         )
         logger.info("Elasticsearch connection established")
 
+        # ISS-021: harden mapping.json load with explicit errors. A corrupt
+        # or missing mapping file used to bubble up as a confusing low-level
+        # JSON/OS error every command. Wrap and produce a clear RuntimeError
+        # naming the path so users know what to fix (reinstall or check
+        # storage permissions).
         fp_mapping = os.path.join(get_project_base_directory(), "conf", "mapping.json")
-        with open(fp_mapping, "r") as f:
-            self.mapping = json.load(f)
+        try:
+            with open(fp_mapping, "r") as f:
+                self.mapping = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            raise RuntimeError(
+                f"Failed to load ES mapping from {fp_mapping}: {e}. "
+                "The file may be missing or corrupt — try reinstalling ragkit."
+            ) from e
+        if not isinstance(self.mapping, dict) or "mappings" not in self.mapping:
+            raise RuntimeError(
+                f"ES mapping at {fp_mapping} is missing required keys; reinstall ragkit."
+            )
 
     def ensure_index(self, index_name: str) -> None:
         """Create the index with the RAG mapping if it does not already exist."""

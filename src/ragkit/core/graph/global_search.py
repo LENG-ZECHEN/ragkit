@@ -39,19 +39,19 @@ from ragkit.logger import logger
 
 # Tunables (kept as module constants so tests can patch them).
 MAP_BATCH_TOKEN_BUDGET = 2000      # max tokens of report text per batch
-RATING_THRESHOLD = 5               # discard points with rating < this
+RATING_THRESHOLD = 50              # discard points with rating < this (0-100 scale)
 DEFAULT_FINAL_TOP_K = 20           # max rated points sent to the answerer
 SHUFFLE_SEED = 42                  # deterministic for testing
 
 
 MAP_PROMPT = """\
-你是知识图谱分析助手。下面是从知识库中检索到的社区报告片段。
-基于这些片段，针对用户问题给出多条要点回答。
+你是知识图谱分析助手。下面是从知识库中检索到的【部分】社区报告片段。
+请从这些片段中提取与用户问题相关的具体要点，并对每条要点的相关度评分。
 
 【用户问题】
 {question}
 
-【社区报告片段】
+【社区报告片段】（注意：这只是相关报告的一个子集，不是全部内容）
 {report_batch}
 
 【输出格式严格 JSON】
@@ -59,20 +59,40 @@ MAP_PROMPT = """\
   "points": [
     {{
       "point": "一条具体的要点回答（带事实和数据）",
-      "rating": 1-10 的整数（这条要点对回答该问题的重要程度）,
+      "rating": 0-100 的整数,
       "source": "支撑这条要点的社区编号或来源（可选）"
     }}
   ]
 }}
 
-【要求】
-1. 只基于给定的社区报告，不要编造
-2. 每条 point 要具体、有信息量，不要泛泛而谈
-3. rating 评分：10=直接回答问题、8=高度相关、5=部分相关、3 以下=几乎不相关
-4. 如果片段里没有任何能回答问题的信息，返回 {{"points": []}}
-5. 全部中文
+【评分标准 —— 务必严格遵守，采用 0-100 制】
+- rating 90-100: 要点本身就是问题的明确答案
+  例如：明确的数字结论、政策表态、直接结论、评级、决策。
+  即使原文以事实陈述形式呈现，也应给 90-100 分。不要因为"看起来像陈述"而压低分数。
+- rating 60-89: 直接相关的支撑性事实
+  例如：业务方向、市场布局、关键财务数据、客户名单、技术细节。
+- rating 30-59: 弱相关或推论性、间接背景信息。
+- rating 10-29: 相关度极低但有微弱关联。
+- rating 0-9: 完全无关或几乎无关。
 
-只返回 JSON，不要任何前缀、引号、markdown 围栏。
+【细致区分 —— 避免 LLM 齐分化】
+- 避免给多条 points 完全相同的评分。即使两条都直接回答问题，
+  请仔细比较哪条更准确、更具体、更直接，用细微的分差（如 92 vs 87）表达强弱。
+- 如果实在判断不出差异，宁愿稍微调低其中一条（如 95 → 93），
+  也不要给两条完全相同的分数 —— 后续 top-K 选择需要细粒度区分。
+
+【硬性禁止 —— 违反将导致最终答案错误】
+- 严禁产出"研报里没有 X"、"未找到 Y"、"本次未提供 Z"等否定性 points。
+  你只看到全部候选社区的一个子集（batch），无权对整个研报作整体否定结论。
+- 如果当前 batch 中完全没有相关信息，请直接返回 {{"points": []}}，
+  不要写"本批次未发现..."这种否定性 point。
+
+【其他要求】
+1. 只基于给定的社区报告，不要编造
+2. 每条 point 要具体、可引用，不要泛泛而谈
+3. 全部中文输出
+
+只返回 JSON，不要任何前缀、解释、markdown 围栏。
 """
 
 
@@ -172,8 +192,18 @@ def _parse_map_response(raw: str) -> list[RatedPoint]:
         logger.warning(f"Global map response JSON parse failed: {e}")
         return []
 
+    # ISS-007: LLM occasionally returns "points": None / string / dict instead
+    # of a list. `.get("points", [])` returns the WRONG-typed value (the default
+    # only kicks in when the key is missing). Coerce defensively.
+    raw_points = data.get("points", [])
+    if not isinstance(raw_points, list):
+        logger.warning(f"Global map response 'points' was not a list: {type(raw_points).__name__}")
+        return []
+
     out: list[RatedPoint] = []
-    for item in data.get("points", []):
+    for item in raw_points:
+        if not isinstance(item, dict):
+            continue  # ISS-007: skip non-dict items (e.g., list-of-strings)
         point = str(item.get("point", "")).strip()
         if not point:
             continue
@@ -182,7 +212,7 @@ def _parse_map_response(raw: str) -> list[RatedPoint]:
             rating = int(round(float(item.get("rating", 0))))
         except (TypeError, ValueError):
             rating = 0
-        rating = max(0, min(10, rating))
+        rating = max(0, min(100, rating))
         source = str(item.get("source", "")).strip()
         out.append(RatedPoint(point=point, rating=rating, source=source))
     return out

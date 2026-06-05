@@ -24,6 +24,7 @@ dependencies = [
     "openai>=1.40",
     "llama-index-core>=0.10",
     "llama-index-postprocessor-dashscope-rerank-custom",
+    "dashscope>=1.20",  # required by the rerank postprocessor (lazy dep upstream)
 
     # Document parsing
     "pdfplumber",
@@ -56,6 +57,13 @@ dependencies = [
     "pyclipper",
     "huggingface_hub",
     "Pillow",
+    "xgboost>=2.0,<3.0",  # deepdoc's updown_concat_xgb.model is legacy binary; XGBoost 3.1+ removed support
+    "six",           # used by deepdoc/vision/operators.py
+    "fasttext",      # used by deepdoc/vision/operators.py (language detection)
+
+    # Tabular / numeric (used by deepdoc parsers + nlp similarity)
+    "pandas",
+    "scikit-learn",  # imported as 'sklearn' by rag/nlp/query.py for cosine similarity
 
     # Utilities
     "xxhash",

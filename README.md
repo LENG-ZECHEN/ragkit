@@ -19,7 +19,7 @@ session-management, and HTTP layers are gone; what's left is the RAG pipeline it
 - **Knowledge graph storage** — NetworkX + JSON persistence (swappable backend)
 - **Community detection** — Louvain clustering
 - **Community summarization** — LLM-generated topic summaries
-- **Three retrieval modes** — local (entity-traversal), global (community summaries), hybrid (both + vector)
+- **Three retrieval modes** — `vector` (BM25 + dense), `local` (entity-centric multi-source), `global` (Map-Reduce over community reports)
 
 ### CLI
 - **Interactive REPL** — typer + rich + prompt_toolkit
@@ -57,7 +57,7 @@ session-management, and HTTP layers are gone; what's left is the RAG pipeline it
    │     ├─ community.py    Louvain clustering           │
    │     ├─ summarizer.py   LLM community summaries      │
    │     ├─ builder.py      orchestrator                 │
-   │     └─ retriever.py    local / global / hybrid      │
+   │     └─ retriever.py    local / global               │
    └────────────────────┬────────────────────────────────┘
                         │
    ┌────────────────────▼────────────────────────────────┐
@@ -142,15 +142,15 @@ rag kb delete finance --yes
 ### Asking questions
 | Command | Purpose |
 |---|---|
-| `rag ask "Q" [--kb NAME] [--mode MODE]` | Single question. Mode: `vector` (default), `local`, `global`, `hybrid` |
-| `rag chat [--kb NAME] [--top-k N] [--thinking]` | Interactive REPL |
+| `rag ask "Q" [--kb NAME] [--mode MODE] [--top-k N] [--level N] [--thinking] [--json] [--debug]` | Single question. Mode: `vector` (default), `local`, `global`. `--level` restricts global to a community level. `--json` emits machine-readable output. |
+| `rag chat [--kb NAME] [--top-k N] [--mode MODE] [--level N] [--thinking] [--debug]` | Interactive REPL with persistent state. Same retrieval modes as `rag ask`. |
 | `rag retrieve "Q" [--kb NAME]` | Retrieval only (no LLM) — useful for tuning |
 
 ### Retrieval modes (for `ask`)
 - **vector** — Original BM25 + dense vector. Fastest. Best for "find me the chunk that says X".
 - **local** — Entity-neighborhood graph traversal. Best for "what is X" / "how does X relate to Y".
 - **global** — Community summaries. Best for thematic ("what does this corpus discuss") questions.
-- **hybrid** — vector + local graph + dedupe. Best general default once the graph is built.
+> Note: a `hybrid` mode existed in earlier versions but was removed once `local` became multi-source. The current three modes cover every use case.
 
 ### Knowledge-base management
 | Command | Purpose |
@@ -162,17 +162,18 @@ rag kb delete finance --yes
 ### Knowledge-graph management
 | Command | Purpose |
 |---|---|
-| `rag graph build --kb NAME` | Build a graph from an already-indexed KB (1 LLM call/chunk) |
-| `rag graph info NAME` | Stats: entities, relations, communities, types |
-| `rag graph show NAME ENTITY [--depth N]` | Inspect one entity and its neighborhood |
-| `rag graph clear NAME` | Delete the graph file (vector index untouched) |
+| `rag graph build --kb NAME [--summarize/--no-summarize] [--max-summaries N] [--consolidate/--no-consolidate] [--max-consolidations N] [--debug]` | Build a graph from an already-indexed KB. Consolidation rewrites long descriptions; summarization generates structured community reports. |
+| `rag graph info NAME` | Stats: entities, relations, communities, by-type breakdown |
+| `rag graph show NAME ENTITY [--depth N]` | Inspect one entity and its neighborhood (BFS depth) |
+| `rag graph report NAME COMMUNITY_ID` | Print the structured report for one community (title, summary, rank, findings) |
+| `rag graph clear NAME [--yes]` | Delete the graph JSON and the `{NAME}_graph` ES index (chunk index untouched) |
 
 ### Diagnostics
 | Command | Purpose |
 |---|---|
 | `rag doctor` | Verify ES connection, API key, dictionaries |
 
-REPL slash commands: `/kb`, `/top`, `/thinking`, `/show <i>`, `/clear`, `/help`, `/exit`.
+REPL slash commands: `/kb`, `/mode`, `/level`, `/top`, `/thinking`, `/debug`, `/show <i>`, `/clear`, `/help`, `/exit` (aliases: `/quit`, `/q`).
 
 ## Configuration (.env)
 
@@ -201,7 +202,7 @@ pytest --cov=ragkit --cov-report=term-missing
 pytest -m unit
 ```
 
-The test suite covers (121 tests total):
+The test suite currently has ~297 behavior-focused tests (run `pytest --collect-only` for the live count). It covers:
 
 **Vector pipeline**
 - **config** — env-var precedence, missing-key contract
@@ -249,13 +250,17 @@ ragkit/
 │   │   │   ├── community.py   ⇆ swap clustering algorithm (Louvain → Leiden)
 │   │   │   ├── summarizer.py  ⇆ swap summary model/prompt
 │   │   │   ├── builder.py     orchestrator
-│   │   │   └── retriever.py   local / global / hybrid
+│   │   │   ├── retriever.py   local / global retrievers (4-stream + Map-Reduce)
+│   │   │   ├── searcher.py    ES kNN helpers
+│   │   │   ├── es_indexer.py  graph artifacts → ES
+│   │   │   ├── global_search.py  Map-Reduce pipeline
+│   │   │   └── description_merger.py  LLM description consolidation
 │   │   ├── rag/            tokenizer + search engine (third-party)
 │   │   ├── api/utils/      project base-path helper
 │   │   └── conf/           ES mapping
 │   ├── config.py
 │   └── logger.py
-├── tests/                  121 behavior-focused tests
+├── tests/                  ~297 behavior-focused tests
 ├── docker-compose.yml      Elasticsearch only
 ├── pyproject.toml
 └── .env.example

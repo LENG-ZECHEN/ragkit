@@ -285,10 +285,12 @@ def cmd_kb_delete(
     deleted = delete_kb(name)
 
     # Also drop the graph companion index — best-effort, may not exist.
+    # ISS-022: surface failures at warn level instead of silent except, so a
+    # connection / permission issue is visible. Matches graph_cmd.py policy.
     try:
         ESConnection().delete_index(f"{name}_graph")
-    except Exception:
-        pass  # not fatal — kb itself is the source of truth
+    except Exception as e:
+        warn(f"Could not delete companion graph index '{name}_graph': {e}")
 
     if deleted:
         success(f"Deleted '{name}'")

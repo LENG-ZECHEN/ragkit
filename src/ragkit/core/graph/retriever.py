@@ -353,8 +353,16 @@ def retrieve_global(
     observe.trace_global_candidates(community_docs)
 
     # 2. Map-Reduce.
+    # `top_k` from CLI is sized for chunks (vector/local). For global it would
+    # silently throttle final POINTS (different unit — points are short rewrites,
+    # need more of them to fill the answer). Use max(user_top_k, default) so the
+    # CLI default never starves global, but power users can still raise it.
+    from ragkit.core.graph.global_search import DEFAULT_FINAL_TOP_K
+    effective_final_top_k = max(top_k, DEFAULT_FINAL_TOP_K)
     with observe.timed("global · map-reduce"):
-        rated_points = run_global_search(question, community_docs, final_top_k=top_k)
+        rated_points = run_global_search(
+            question, community_docs, final_top_k=effective_final_top_k
+        )
     if not rated_points:
         return []
 

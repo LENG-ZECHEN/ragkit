@@ -13,6 +13,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
+import ast
 import logging
 import re
 from dataclasses import dataclass
@@ -262,7 +263,17 @@ class Dealer:
         q_denor = np.sqrt(np.sum([s*s for t,s in query_rfea.items() if t != PAGERANK_FLD]))
         for i in search_res.ids:
             nor, denor = 0, 0
-            for t, sc in eval(search_res.field[i].get(TAG_FLD, "{}")).items():
+            # SECURITY (ISS-001): replaced eval() with ast.literal_eval() —
+            # this field comes from Elasticsearch documents which an attacker
+            # could potentially write into. eval() would have been an RCE sink.
+            raw_tag = search_res.field[i].get(TAG_FLD, "{}")
+            try:
+                tag_dict = ast.literal_eval(raw_tag) if isinstance(raw_tag, str) else raw_tag
+                if not isinstance(tag_dict, dict):
+                    tag_dict = {}
+            except (ValueError, SyntaxError):
+                tag_dict = {}
+            for t, sc in tag_dict.items():
                 if t in query_rfea:
                     nor += query_rfea[t] * sc
                 denor += sc * sc

@@ -60,8 +60,17 @@ def detect_communities(
         return []
 
     # No edges → no partition possible; bundle the isolated nodes so they
-    # still appear in global retrieval.
+    # still appear in global retrieval. ISS-018: but if there are fewer
+    # than MIN_COMMUNITY_SIZE nodes, the misc bucket itself would be a
+    # degenerate community — skip it entirely so downstream global search
+    # doesn't see a useless 1-entity "community".
     if g.number_of_edges() == 0:
+        if g.number_of_nodes() < MIN_COMMUNITY_SIZE:
+            logger.info(
+                f"Graph has {g.number_of_nodes()} node(s), no edges — "
+                "skipping misc community (below MIN_COMMUNITY_SIZE)"
+            )
+            return []
         logger.info("Graph has no edges — bundling isolated nodes into misc community")
         return [
             Community(

@@ -110,13 +110,13 @@ def test_strip_code_fence_plain_passthrough():
 def test_parse_map_response_extracts_rated_points():
     raw = json.dumps({
         "points": [
-            {"point": "P1", "rating": 9},
-            {"point": "P2", "rating": 5, "source": "Community 3"},
+            {"point": "P1", "rating": 90},
+            {"point": "P2", "rating": 50, "source": "Community 3"},
         ]
     })
     out = _parse_map_response(raw)
     assert len(out) == 2
-    assert out[0].point == "P1" and out[0].rating == 9
+    assert out[0].point == "P1" and out[0].rating == 90
     assert out[1].source == "Community 3"
 
 
@@ -124,9 +124,9 @@ def test_parse_map_response_drops_empty_points():
     """LLM sometimes returns blank points; drop them."""
     raw = json.dumps({
         "points": [
-            {"point": "Good", "rating": 8},
-            {"point": "", "rating": 9},  # empty point → drop
-            {"point": "   ", "rating": 9},  # whitespace → drop
+            {"point": "Good", "rating": 80},
+            {"point": "", "rating": 90},  # empty point → drop
+            {"point": "   ", "rating": 90},  # whitespace → drop
         ]
     })
     out = _parse_map_response(raw)
@@ -135,16 +135,16 @@ def test_parse_map_response_drops_empty_points():
 
 
 def test_parse_map_response_clamps_rating():
-    """Ratings outside [0, 10] are clamped to range."""
+    """Ratings outside [0, 100] are clamped to range."""
     raw = json.dumps({
         "points": [
-            {"point": "A", "rating": 99},   # clamped to 10
+            {"point": "A", "rating": 999},  # clamped to 100
             {"point": "B", "rating": -3},   # clamped to 0
-            {"point": "C", "rating": "high"}, # non-numeric → 0
+            {"point": "C", "rating": "high"},  # non-numeric → 0
         ]
     })
     out = _parse_map_response(raw)
-    assert out[0].rating == 10
+    assert out[0].rating == 100
     assert out[1].rating == 0
     assert out[2].rating == 0
 
@@ -155,7 +155,7 @@ def test_parse_map_response_handles_bad_json():
 
 
 def test_parse_map_response_handles_code_fence():
-    raw = '```json\n' + json.dumps({"points": [{"point": "P", "rating": 7}]}) + '\n```'
+    raw = '```json\n' + json.dumps({"points": [{"point": "P", "rating": 70}]}) + '\n```'
     out = _parse_map_response(raw)
     assert len(out) == 1 and out[0].point == "P"
 
@@ -165,7 +165,7 @@ def test_parse_map_response_handles_code_fence():
 
 def test_map_rate_batch_calls_llm_with_question_and_reports(fake_openai):
     fake_openai.chat_script = [("content", json.dumps({
-        "points": [{"point": "ANSWER", "rating": 8}]
+        "points": [{"point": "ANSWER", "rating": 80}]
     }))]
     batch = [_report(0, "report content"), _report(1, "another")]
 
@@ -192,9 +192,9 @@ def test_map_rate_batch_returns_empty_on_llm_failure(fake_openai, monkeypatch):
 
 def test_reduce_filters_below_threshold():
     points = [
-        RatedPoint(point="A", rating=9),
-        RatedPoint(point="B", rating=4),  # below default 5
-        RatedPoint(point="C", rating=7),
+        RatedPoint(point="A", rating=90),
+        RatedPoint(point="B", rating=40),  # below default 50
+        RatedPoint(point="C", rating=70),
     ]
     out = _reduce_rated_points(points)
     kept_texts = {p.point for p in out}
@@ -203,16 +203,16 @@ def test_reduce_filters_below_threshold():
 
 def test_reduce_sorts_by_rating_desc():
     points = [
-        RatedPoint(point="low", rating=5),
-        RatedPoint(point="high", rating=10),
-        RatedPoint(point="mid", rating=7),
+        RatedPoint(point="low", rating=50),
+        RatedPoint(point="high", rating=100),
+        RatedPoint(point="mid", rating=70),
     ]
     out = _reduce_rated_points(points)
     assert [p.point for p in out] == ["high", "mid", "low"]
 
 
 def test_reduce_respects_top_k():
-    points = [RatedPoint(point=f"p{i}", rating=10) for i in range(50)]
+    points = [RatedPoint(point=f"p{i}", rating=100) for i in range(50)]
     out = _reduce_rated_points(points, top_k=5)
     assert len(out) == 5
 
@@ -227,7 +227,7 @@ def test_reduce_empty_input():
 def test_run_global_search_full_pipeline(fake_openai):
     """E2E: shuffle → batch → map (mocked LLM) → reduce."""
     fake_openai.chat_script = [("content", json.dumps({
-        "points": [{"point": "ANSWER_POINT", "rating": 9}]
+        "points": [{"point": "ANSWER_POINT", "rating": 90}]
     }))]
     reports = [_report(i, "report text") for i in range(3)]
 
@@ -244,15 +244,15 @@ def test_run_global_search_empty_input():
 def test_run_global_search_drops_all_below_threshold(fake_openai):
     """When all LLM ratings are below threshold, final list is empty."""
     fake_openai.chat_script = [("content", json.dumps({
-        "points": [{"point": "irrelevant", "rating": 3}]
+        "points": [{"point": "irrelevant", "rating": 30}]
     }))]
     reports = [_report(0)]
-    out = run_global_search("q", reports, rating_threshold=5)
+    out = run_global_search("q", reports, rating_threshold=50)
     assert out == []
 
 
 def test_run_global_search_constants_are_reasonable():
     """Regression guard on tunables."""
-    assert 0 < RATING_THRESHOLD <= 10
+    assert 0 < RATING_THRESHOLD <= 100
     assert MAP_BATCH_TOKEN_BUDGET >= 500
     assert DEFAULT_FINAL_TOP_K >= 5

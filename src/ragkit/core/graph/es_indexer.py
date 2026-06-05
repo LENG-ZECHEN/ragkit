@@ -174,18 +174,22 @@ def _fetch_existing_entity_hashes(kb_name: str, es) -> dict[str, str]:
         return {}
 
     out: dict[str, str] = {}
+    sid = None
     # Scroll over all entity docs (could be thousands).
-    resp = es.search(
-        index=index,
-        body={
-            "query": {"term": {"type_kwd": "entity"}},
-            "_source": ["entity_name_kwd", "desc_hash_kwd"],
-        },
-        size=1000,
-        scroll="2m",
-    )
-    sid = resp.get("_scroll_id")
+    # ROBUSTNESS (ISS-006): wrap the initial search in try/except too — any
+    # transient ES failure must degrade gracefully (treat as empty, re-embed
+    # everything) rather than crash the whole index pipeline before the
+    # community deletion step.
     try:
+        resp = es.search(
+            index=index,
+            # Modern elasticsearch-py 8.x kwargs (ISS-015: replaces deprecated body=).
+            query={"term": {"type_kwd": "entity"}},
+            source=["entity_name_kwd", "desc_hash_kwd"],
+            size=1000,
+            scroll="2m",
+        )
+        sid = resp.get("_scroll_id")
         while True:
             hits = resp["hits"]["hits"]
             if not hits:
@@ -198,6 +202,12 @@ def _fetch_existing_entity_hashes(kb_name: str, es) -> dict[str, str]:
                     out[name] = desc_hash
             resp = es.scroll(scroll_id=sid, scroll="2m")
             sid = resp.get("_scroll_id", sid)
+    except Exception as e:
+        logger.warning(
+            f"_fetch_existing_entity_hashes: ES error ({e}). "
+            "Treating as empty index — all entities will be re-embedded."
+        )
+        return {}
     finally:
         if sid:
             try:
@@ -228,16 +238,15 @@ def _delete_community_docs(kb_name: str, es) -> None:
     if not es.indices.exists(index=index):
         return
     try:
+        # ISS-015: modern elasticsearch-py 8.x kwargs (replaces deprecated body=).
         es.delete_by_query(
             index=index,
-            body={
-                "query": {
-                    "bool": {
-                        "must": [
-                            {"term": {"type_kwd": "community"}},
-                            {"term": {"kb_id": kb_name}},
-                        ]
-                    }
+            query={
+                "bool": {
+                    "must": [
+                        {"term": {"type_kwd": "community"}},
+                        {"term": {"kb_id": kb_name}},
+                    ]
                 }
             },
             refresh=True,
@@ -269,10 +278,14 @@ def _embed_in_batches(
             vectors.extend([None] * len(chunk))
             continue
         if len(batch_vecs) != len(chunk):
+            # ISS-035: keep aligned vectors when possible — only mark the
+            # missing positions as failed, not the whole batch.
             logger.error(
-                f"Embedding returned {len(batch_vecs)} vectors for {len(chunk)} inputs"
+                f"Embedding returned {len(batch_vecs)} vectors for {len(chunk)} inputs "
+                f"— keeping first {len(batch_vecs)}, marking rest as failed"
             )
-            vectors.extend([None] * len(chunk))
+            vectors.extend(batch_vecs[: len(chunk)])
+            vectors.extend([None] * (len(chunk) - len(batch_vecs)))
             continue
         vectors.extend(batch_vecs)
     return vectors
@@ -327,8 +340,9 @@ def index_graph_to_es(
             entity_embedded = len(entity_docs)
 
         # Abort hard if too many failures (a quota issue would silently
-        # produce a half-indexed graph otherwise).
-        if to_embed and entity_failed / len(to_embed) > EMBED_FAILURE_ABORT_RATIO:
+        # produce a half-indexed graph otherwise). ISS-036: we're already
+        # inside `if to_embed:` so the prefix guard was redundant.
+        if entity_failed / len(to_embed) > EMBED_FAILURE_ABORT_RATIO:
             raise RuntimeError(
                 f"Entity embedding failed for {entity_failed}/{len(to_embed)} "
                 f"items in {kb_name}_graph (>{EMBED_FAILURE_ABORT_RATIO:.0%}). "
@@ -367,7 +381,8 @@ def index_graph_to_es(
             es.insert(community_docs, f"{kb_name}_graph")
             community_embedded = len(community_docs)
 
-        if communities and community_failed / len(communities) > EMBED_FAILURE_ABORT_RATIO:
+        # ISS-036: already inside `if communities:` — prefix guard was redundant.
+        if community_failed / len(communities) > EMBED_FAILURE_ABORT_RATIO:
             raise RuntimeError(
                 f"Community embedding failed for {community_failed}/{len(communities)} "
                 f"items in {kb_name}_graph (>{EMBED_FAILURE_ABORT_RATIO:.0%})."

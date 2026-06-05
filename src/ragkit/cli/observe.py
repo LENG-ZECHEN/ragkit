@@ -207,7 +207,7 @@ def references_table_with_kind(hits: list) -> Table:
         elif "weight" in extra:
             score_parts.append(f"w={extra['weight']:.1f}")
         elif "rating" in extra:
-            score_parts.append(f"r={extra['rating']}/10")
+            score_parts.append(f"r={extra['rating']}/100")
         elif "source_hits" in extra:
             score_parts.append(f"hits={extra['source_hits']}")
         # Escape title — entity titles like "qwen [model]" would otherwise be
@@ -408,11 +408,13 @@ def trace_global_map_batch(batch_index: int, n_reports: int, rated_points: list)
         f"  [dim]Global · map batch {batch_index} ({n_reports} reports) → "
         f"[green]{len(rated_points)} points[/green]:[/dim]"
     )
-    for p in rated_points[:3]:  # cap
+    # --debug is opt-in; show all points so the rating distribution is
+    # fully inspectable (no silent truncation past the first 3).
+    for p in rated_points:
         rating = getattr(p, "rating", 0)
         text = getattr(p, "point", "")
         display = text[:80] + "…" if len(text) > 80 else text
-        console.print(f"    · [{rating}/10] {display}")
+        console.print(f"    · [{rating}/100] {display}")
 
 
 def trace_global_reduce(n_total_points: int, n_kept: int, threshold: int) -> None:

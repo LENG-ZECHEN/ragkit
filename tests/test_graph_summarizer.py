@@ -262,3 +262,40 @@ def test_summarize_all_fires_progress_callback(tmp_path, fake_openai):
     # current should go 1, 2 ...
     assert stages[0][1] == 1
     assert stages[1][1] == 2
+
+
+# ----- ISS-013: edge cases for summarize_all ------------------------------
+
+
+def test_summarize_all_with_empty_store_makes_no_llm_calls(tmp_path, fake_openai):
+    """Empty store → no chat calls, no failures, early-return path."""
+    store = NetworkXGraphStore(path=tmp_path / "g.json")
+    # No communities set at all.
+    failures = summarize_all(store)
+    assert failures == 0
+    chat_calls = [c for c in fake_openai.calls if c["kind"] == "chat"]
+    assert chat_calls == []
+
+
+def test_summarize_all_with_zero_cap_processes_nothing(tmp_path, fake_openai):
+    """max_communities=0 must mean 'process none', NOT 'process all'.
+
+    Off-by-one regression here would be hard to spot otherwise: 0 could
+    accidentally bypass the slice and process everything if interpreted
+    as falsy → None.
+    """
+    fake_openai.chat_script = [("content", json.dumps({
+        "title": "T", "summary": "S", "rank": 5, "findings": [],
+    }))]
+    store = _store(tmp_path)
+    store.set_communities([
+        Community(id=0, entity_names=["qwen", "dashscope"]),
+        Community(id=1, entity_names=["qwen"]),
+    ])
+
+    failures = summarize_all(store, max_communities=0)
+    assert failures == 0
+    chat_calls = [c for c in fake_openai.calls if c["kind"] == "chat"]
+    assert chat_calls == []
+    # Communities themselves preserved.
+    assert len(store.all_communities()) == 2

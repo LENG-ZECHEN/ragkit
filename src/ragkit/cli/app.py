@@ -1,12 +1,20 @@
 """ragkit CLI entry point.
 
-Usage:
-    rag index <path> [--kb default]
-    rag ask "..." [--kb default]
-    rag chat [--kb default]
-    rag retrieve "..." [--kb default]
-    rag kb list | info <name> | delete <name>
-    rag doctor
+For up-to-date command and flag listings, run::
+
+    rag --help
+    rag <command> --help
+
+Top-level commands:
+    index     Parse + embed + index files; --build-graph to also build the graph
+    ask       Single question (modes: vector | local | global)
+    chat      Interactive REPL
+    retrieve  Run retrieval only (no LLM call)
+    doctor    Verify ES + DashScope key + dictionaries
+    kb        list | info | delete
+    graph     build | info | show | report | clear
+
+Every long-running command accepts ``--debug`` for pipeline tracing.
 """
 
 from __future__ import annotations
@@ -31,7 +39,7 @@ app.add_typer(graph_app)
 
 # Top-level commands
 app.command("index", help="Parse, embed, index. Add --build-graph to also extract a knowledge graph.")(commands.cmd_index)
-app.command("ask", help="Ask a question (modes: vector|local|global|hybrid).")(commands.cmd_ask)
+app.command("ask", help="Ask a question (modes: vector|local|global).")(commands.cmd_ask)
 app.command("chat", help="Start an interactive chat REPL.")(cmd_chat)
 app.command("retrieve", help="Run retrieval only (no LLM call).")(commands.cmd_retrieve)
 app.command("doctor", help="Check ES, API key, dict files.")(commands.cmd_doctor)
