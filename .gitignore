@@ -56,6 +56,10 @@ src/ragkit/core/_ragflow/rag/res/deepdoc/updown_concat_xgb.model
 # Tokenizer trie cache (rebuilt from huqie.txt on first run)
 *.txt.trie
 
+# tiktoken BPE cache — SHA1-named blobs written to TIKTOKEN_CACHE_DIR
+# (currently set to _ragflow/ by rag/utils/__init__.py). Auto-regenerated.
+src/ragkit/core/_ragflow/[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*
+
 # Test artifacts
 tests/_artifacts/
 
