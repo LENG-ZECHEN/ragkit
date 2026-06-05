@@ -23,6 +23,14 @@ def cmd_index(
         "--build-graph",
         help="Also extract entities/relations and build a knowledge graph (slow — one LLM call per chunk).",
     ),
+    replace: bool = typer.Option(
+        False,
+        "--replace",
+        help="For each file, delete existing chunks with the same name first. "
+             "Use when re-indexing a changed file (defends against duplicate / "
+             "stale-content drift). Without this flag, indexing APPENDS and a "
+             "warning is shown if conflicts are detected.",
+    ),
     debug: bool = typer.Option(
         False,
         "--debug",
@@ -69,7 +77,10 @@ def cmd_index(
                 progress.update(task, completed=prog, stage=stage)
 
             try:
-                result = index_file(fp, kb_name=kb, build_graph=build_graph, progress_cb=cb)
+                result = index_file(
+                    fp, kb_name=kb, build_graph=build_graph,
+                    replace=replace, progress_cb=cb,
+                )
                 done_label = f"{result['chunks']} chunks"
                 if build_graph and "graph_entities" in result:
                     done_label += f", {result['graph_entities']}e/{result['graph_relations']}r"

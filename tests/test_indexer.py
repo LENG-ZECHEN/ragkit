@@ -7,7 +7,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ragkit.core.indexer import _build_doc, index_file
+from ragkit.core.indexer import (
+    _build_doc,
+    _count_existing_chunks_for_file,
+    _delete_existing_chunks_for_file,
+    index_file,
+)
 
 
 # ----- _build_doc unit ----------------------------------------------------
@@ -169,3 +174,135 @@ def test_index_file_no_graph_path_does_not_import_graph_builder(sample_txt, fake
     result = index_file(sample_txt, kb_name="kb", build_graph=False)
     assert trip_wire["called"] is False
     assert "graph_entities" not in result
+
+
+# ===========================================================================
+# Scenario E — re-index protection (option B: --replace flag + warning)
+# ===========================================================================
+
+
+def test_count_existing_chunks_returns_zero_when_index_missing(fake_es):
+    """No index → no chunks to count, no error."""
+    fake_es.es.indices.exists.return_value = False
+    assert _count_existing_chunks_for_file("kb", "report.pdf") == 0
+
+
+def test_count_existing_chunks_returns_es_count(fake_es):
+    """When the index has matching docs, return the ES count value."""
+    fake_es.es.indices.exists.return_value = True
+    fake_es.es.count.return_value = {"count": 7}
+
+    n = _count_existing_chunks_for_file("kb", "report.pdf")
+
+    assert n == 7
+    # Verify we actually queried by docnm_kwd:
+    call = fake_es.es.count.call_args
+    assert call.kwargs["index"] == "kb"
+    assert call.kwargs["query"] == {"term": {"docnm_kwd": "report.pdf"}}
+
+
+def test_count_existing_chunks_degrades_to_zero_on_es_error(fake_es):
+    """ES failure must NOT crash indexing — degrade to 0 (treat as new file)."""
+    fake_es.es.indices.exists.return_value = True
+    fake_es.es.count.side_effect = RuntimeError("ES transient")
+
+    assert _count_existing_chunks_for_file("kb", "report.pdf") == 0
+
+
+def test_delete_existing_chunks_no_op_when_index_missing(fake_es):
+    """No index → nothing to delete."""
+    fake_es.es.indices.exists.return_value = False
+
+    assert _delete_existing_chunks_for_file("kb", "report.pdf") == 0
+    fake_es.es.delete_by_query.assert_not_called()
+
+
+def test_delete_existing_chunks_calls_delete_by_query(fake_es):
+    """When the index exists, issue delete_by_query and return the count."""
+    fake_es.es.indices.exists.return_value = True
+    fake_es.es.delete_by_query.return_value = {"deleted": 25}
+
+    n = _delete_existing_chunks_for_file("kb", "report.pdf")
+
+    assert n == 25
+    call = fake_es.es.delete_by_query.call_args
+    assert call.kwargs["index"] == "kb"
+    assert call.kwargs["query"] == {"term": {"docnm_kwd": "report.pdf"}}
+    assert call.kwargs["refresh"] is True
+
+
+def test_delete_existing_chunks_raises_on_es_error(fake_es):
+    """An ES failure must HARD ABORT — leaving stale + new chunks side-by-side
+    would defeat the purpose of --replace."""
+    fake_es.es.indices.exists.return_value = True
+    fake_es.es.delete_by_query.side_effect = RuntimeError("ES transient")
+
+    with pytest.raises(RuntimeError, match="Failed to delete stale chunks"):
+        _delete_existing_chunks_for_file("kb", "report.pdf")
+
+
+def test_index_file_default_warns_on_stale_chunks(
+    sample_txt, fake_openai, fake_es, monkeypatch, capsys
+):
+    """Default behavior: detect existing chunks, warn, but APPEND new ones."""
+    fake_es.es.indices.exists.return_value = True
+    fake_es.es.count.return_value = {"count": 12}  # 12 existing chunks
+
+    result = index_file(sample_txt, kb_name="kb", build_graph=False)
+
+    # Warning surfaced via observe → rich console → captured stdout
+    captured = capsys.readouterr()
+    assert "already has 12 chunk" in captured.out
+    assert "--replace" in captured.out
+    # Delete should NOT have been called
+    fake_es.es.delete_by_query.assert_not_called()
+    # Indexing still proceeded
+    assert result["replaced"] == 0
+    assert result["chunks"] > 0
+
+
+def test_index_file_replace_deletes_then_indexes(
+    sample_txt, fake_openai, fake_es, monkeypatch, capsys
+):
+    """With --replace: count + delete + then index normally."""
+    fake_es.es.indices.exists.return_value = True
+    fake_es.es.count.return_value = {"count": 12}
+    fake_es.es.delete_by_query.return_value = {"deleted": 12}
+
+    result = index_file(sample_txt, kb_name="kb", build_graph=False, replace=True)
+
+    # Confirmation surfaced via observe
+    captured = capsys.readouterr()
+    assert "Deleted 12 stale chunk" in captured.out
+    # Delete WAS called
+    fake_es.es.delete_by_query.assert_called_once()
+    # Result reports the deletion
+    assert result["replaced"] == 12
+    assert result["chunks"] > 0
+
+
+def test_index_file_replace_is_no_op_when_no_existing_chunks(
+    sample_txt, fake_openai, fake_es
+):
+    """--replace on a fresh file: no delete needed, just index normally."""
+    fake_es.es.indices.exists.return_value = False  # no index yet
+
+    result = index_file(sample_txt, kb_name="kb", build_graph=False, replace=True)
+
+    fake_es.es.delete_by_query.assert_not_called()
+    assert result["replaced"] == 0
+    assert result["chunks"] > 0
+
+
+def test_index_file_no_warning_when_kb_is_fresh(
+    sample_txt, fake_openai, fake_es, capsys
+):
+    """First-time index (no existing chunks) → no warning, no noise."""
+    fake_es.es.indices.exists.return_value = False  # fresh KB
+
+    result = index_file(sample_txt, kb_name="kb", build_graph=False)
+
+    captured = capsys.readouterr()
+    assert "already has" not in captured.out
+    assert "stale" not in captured.out
+    assert result["replaced"] == 0

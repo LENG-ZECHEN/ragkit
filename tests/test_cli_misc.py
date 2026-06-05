@@ -119,7 +119,7 @@ def test_index_recursive_picks_up_nested_files(tmp_path, fake_openai, fake_es, m
 
     indexed: list[str] = []
 
-    def fake_index(path, kb_name, *, build_graph=False, progress_cb=None):
+    def fake_index(path, kb_name, *, build_graph=False, replace=False, progress_cb=None):
         indexed.append(Path(path).name)
         return {"file": Path(path).name, "chunks": 1, "kb": kb_name}
 
@@ -145,8 +145,9 @@ def test_index_build_graph_flag_passes_through(tmp_path, fake_openai, fake_es, m
 
     captured: dict = {}
 
-    def fake_index(path, kb_name, *, build_graph=False, progress_cb=None):
+    def fake_index(path, kb_name, *, build_graph=False, replace=False, progress_cb=None):
         captured["build_graph"] = build_graph
+        captured["replace"] = replace
         return {"file": Path(path).name, "chunks": 1, "kb": kb_name}
 
     monkeypatch.setattr("ragkit.core.indexer.index_file", fake_index)
@@ -158,6 +159,14 @@ def test_index_build_graph_flag_passes_through(tmp_path, fake_openai, fake_es, m
     # Flag set: True
     runner.invoke(app, ["index", str(tmp_path / "doc.txt"), "--kb", "k", "--build-graph"])
     assert captured["build_graph"] is True
+
+    # --replace also passes through (CLI surface for ISS-046 / scenario E)
+    captured.clear()
+    runner.invoke(app, ["index", str(tmp_path / "doc.txt"), "--kb", "k", "--replace"])
+    assert captured["replace"] is True
+    captured.clear()
+    runner.invoke(app, ["index", str(tmp_path / "doc.txt"), "--kb", "k"])
+    assert captured["replace"] is False
 
 
 # ============================================================

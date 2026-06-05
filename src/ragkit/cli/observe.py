@@ -120,6 +120,26 @@ def timed(label: str):
 # ===========================================================================
 
 
+def show_stale_chunks_warning(file_name: str, existing_count: int, kb_name: str) -> None:
+    """Warn when a file is being re-indexed and already has chunks in the KB.
+
+    Triggered in default mode (without --replace). Surfaces the 'scenario E'
+    stale-chunks risk: the about-to-be-indexed chunks may overlap, producing
+    duplicate / contradictory entries in ES.
+    """
+    console.print(
+        f"  [yellow]⚠ {file_name} already has {existing_count} chunk(s) in "
+        f"'{kb_name}'. Indexing will APPEND — use --replace to delete old first.[/yellow]"
+    )
+
+
+def show_stale_chunks_deleted(file_name: str, deleted_count: int) -> None:
+    """Confirm that --replace successfully wiped the old chunks for this file."""
+    console.print(
+        f"  [dim]→ Deleted {deleted_count} stale chunk(s) for {file_name}[/dim]"
+    )
+
+
 def show_chunks_produced(file_name: str, n_chunks: int) -> None:
     """After parse+chunk, surface how many pieces the file became.
 
