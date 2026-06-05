@@ -176,10 +176,13 @@ def test_graph_build_errors_when_kb_missing(fake_es):
 
 
 def test_graph_build_errors_on_empty_kb_name(fake_es):
-    """Whitespace-only --kb must reject (defends against shell-quoting bugs)."""
+    """Whitespace-only --kb must reject. ISS-003 now catches this at
+    validate_kb_name (raised as ValueError before reaching graph_build)."""
     result = runner.invoke(app, ["graph", "build", "--kb", "   "])
     assert result.exit_code != 0
-    assert "non-empty" in result.stdout.lower()
+    # New error path raises ValueError("Invalid kb name ...") via kb_validator.
+    exc = result.exception
+    assert isinstance(exc, ValueError) and "Invalid kb name" in str(exc)
 
 
 def test_graph_build_warns_when_no_chunks(fake_es):

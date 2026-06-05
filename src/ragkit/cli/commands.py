@@ -11,6 +11,7 @@ from rich.table import Table
 
 from ragkit.cli.ui import console, error, info, kv_table, success, warn
 from ragkit.config import get_config
+from ragkit.core.kb_validator import validate_kb_name
 
 
 def cmd_index(
@@ -29,6 +30,7 @@ def cmd_index(
     ),
 ) -> None:
     """Parse, chunk, embed and index a file or directory into a knowledge base."""
+    validate_kb_name(kb)
     from ragkit.cli import observe
     from ragkit.core.chunker import is_supported
     from ragkit.core.indexer import index_file
@@ -118,6 +120,7 @@ def cmd_ask(
                 community reports, neighbor entities, relations)
       global  — Map-Reduce over community reports (best for thematic queries)
     """
+    validate_kb_name(kb)
     from ragkit.cli import observe
     from ragkit.core.generator import generate
     from ragkit.core.retriever import retrieve
@@ -207,6 +210,7 @@ def cmd_retrieve(
     ),
 ) -> None:
     """Run retrieval only (no LLM call) — useful for tuning."""
+    validate_kb_name(kb)
     from ragkit.cli import observe
     from ragkit.core.retriever import retrieve
 
@@ -243,6 +247,7 @@ def cmd_kb_info(
     name: str = typer.Argument(..., help="Knowledge base name."),
 ) -> None:
     """Show stats and document list for a knowledge base."""
+    validate_kb_name(name)
     from ragkit.core.kb_manager import kb_documents, kb_info
 
     stats = kb_info(name)
@@ -273,6 +278,7 @@ def cmd_kb_delete(
     Also removes the companion {name}_graph index if it exists (avoids
     orphan graph data after the chunk index is gone).
     """
+    validate_kb_name(name)
     from ragkit.core.kb_manager import delete_kb
     from ragkit.core._ragflow.rag.utils.es_conn import ESConnection
 

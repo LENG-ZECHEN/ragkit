@@ -7,6 +7,7 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeEl
 from rich.table import Table
 
 from ragkit.cli.ui import console, error, info, kv_table, success, warn
+from ragkit.core.kb_validator import validate_kb_name
 from ragkit.logger import logger
 
 
@@ -34,6 +35,7 @@ def cmd_graph_build(
 
     Reads chunks back from Elasticsearch and runs entity/relation extraction.
     """
+    validate_kb_name(kb)
     from ragkit.cli import observe
     from ragkit.core.graph.builder import build_graph
     from ragkit.core._ragflow.rag.utils.es_conn import ESConnection
@@ -128,6 +130,7 @@ def cmd_graph_info(
     kb: str = typer.Argument(..., help="Knowledge base name."),
 ) -> None:
     """Show graph stats for a knowledge base."""
+    validate_kb_name(kb)
     from ragkit.core.graph.store import open_store
 
     store = open_store(kb)
@@ -162,6 +165,7 @@ def cmd_graph_show(
     depth: int = typer.Option(1, "--depth", "-d", help="BFS neighborhood depth."),
 ) -> None:
     """Show one entity and its neighborhood."""
+    validate_kb_name(kb)
     from ragkit.core.graph.store import open_store
 
     store = open_store(kb)
@@ -202,6 +206,7 @@ def cmd_graph_report(
     Shows title, summary, rank, rank_explanation, and all findings.
     Use this to inspect what the LLM produced for a specific cluster.
     """
+    validate_kb_name(kb)
     from ragkit.core.graph.store import open_store
 
     store = open_store(kb)
@@ -242,6 +247,7 @@ def cmd_graph_clear(
 
     The chunk index ({kb}) stays intact — only the derived graph layer is removed.
     """
+    validate_kb_name(kb)
     from ragkit.core.graph.store import open_store
     from ragkit.core._ragflow.rag.utils.es_conn import ESConnection
 

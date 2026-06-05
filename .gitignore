@@ -42,10 +42,12 @@ htmlcov/
 
 # Project specific
 .env
-storage/uploads/
-storage/parsed/
-storage/model_cache/
+storage/
 *.log
+
+# User's local test artifacts (not part of the project)
+*.pdf
+!docs/**/*.pdf
 
 # Large model files (auto-downloaded from HuggingFace on first run)
 *.onnx

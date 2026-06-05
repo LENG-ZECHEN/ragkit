@@ -34,6 +34,11 @@ load_dotenv()
 ES_HOST = os.getenv("ES_HOST", "http://localhost:9200")
 ES_USER = os.getenv("ES_USER", "elastic")
 ES_PASSWORD = os.getenv("ES_PASSWORD", "infini_rag_flow")
+# ISS-004: dev defaults preserved; opt-in to TLS verification / shorter timeout
+# via env vars. Production deployments should set ES_VERIFY_CERTS=true and a
+# CA cert path; the 60s default timeout replaces the previous 600s catch-all.
+ES_VERIFY_CERTS = os.getenv("ES_VERIFY_CERTS", "false").lower() == "true"
+ES_TIMEOUT_SECS = int(os.getenv("ES_TIMEOUT_SECS", "60"))
 ATTEMPT_TIME = 2
 PAGERANK_FLD = "pagerank_fea"
 TAG_FLD = "tag_feas"
@@ -46,11 +51,14 @@ class ESConnection():
     def __init__(self):
         self.info = {}
         logger.info(f"Connecting to Elasticsearch at {ES_HOST}")
+        # ISS-004: ES_VERIFY_CERTS + ES_TIMEOUT_SECS env-controlled.
+        # Also migrate to `request_timeout` kwarg (the `timeout=` form is
+        # deprecated and emits DeprecationWarning in elasticsearch-py 8.x).
         self.es = Elasticsearch(
             [ES_HOST],
             basic_auth=(ES_USER, ES_PASSWORD),
-            verify_certs=False,
-            timeout=600,
+            verify_certs=ES_VERIFY_CERTS,
+            request_timeout=ES_TIMEOUT_SECS,
         )
         logger.info("Elasticsearch connection established")
 

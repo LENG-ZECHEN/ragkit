@@ -28,6 +28,7 @@ from rich.table import Table
 
 from ragkit.cli import observe
 from ragkit.cli.ui import console, error, info, warn
+from ragkit.core.kb_validator import validate_kb_name
 from ragkit.core.retriever import RetrievedChunk
 
 PROMPT_STYLE = Style.from_dict({"prompt": "ansicyan bold"})
@@ -285,6 +286,7 @@ def cmd_chat(
     ),
 ) -> None:
     """Start an interactive REPL. Type /help inside for commands."""
+    validate_kb_name(kb)
     if mode not in VALID_MODES:
         error(f"Invalid --mode '{mode}'. Choose from: {', '.join(VALID_MODES)}")
         raise typer.Exit(code=2)
