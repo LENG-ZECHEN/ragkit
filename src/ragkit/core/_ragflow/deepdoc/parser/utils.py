@@ -14,7 +14,7 @@
 #  limitations under the License.
 #
 
-from ragkit.core.rag.nlp import find_codec
+from ragkit.core._ragflow.rag.nlp import find_codec
 
 
 def get_text(fnm: str, binary=None) -> str:

@@ -23,9 +23,9 @@ import cv2
 import numpy as np
 from huggingface_hub import snapshot_download
 
-from ragkit.core.api.utils.file_utils import get_project_base_directory
-from ragkit.core.deepdoc.vision import Recognizer
-from ragkit.core.deepdoc.vision.operators import nms
+from ragkit.core._ragflow.api.utils.file_utils import get_project_base_directory
+from ragkit.core._ragflow.deepdoc.vision import Recognizer
+from ragkit.core._ragflow.deepdoc.vision.operators import nms
 
 
 class LayoutRecognizer(Recognizer):

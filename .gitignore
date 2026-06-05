@@ -50,8 +50,8 @@ storage/model_cache/
 # Large model files (auto-downloaded from HuggingFace on first run)
 *.onnx
 *.xgb_model
-src/ragkit/core/rag/res/deepdoc/*.onnx
-src/ragkit/core/rag/res/deepdoc/updown_concat_xgb.model
+src/ragkit/core/_ragflow/rag/res/deepdoc/*.onnx
+src/ragkit/core/_ragflow/rag/res/deepdoc/updown_concat_xgb.model
 
 # Tokenizer trie cache (rebuilt from huqie.txt on first run)
 *.txt.trie

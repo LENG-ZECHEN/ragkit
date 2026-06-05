@@ -236,8 +236,8 @@ def trace_query_rewriting(question: str, queryer: Any) -> None:
     if not is_debug():
         return
 
-    from ragkit.core.rag.nlp import rag_tokenizer
-    from ragkit.core.rag.nlp.query import FulltextQueryer
+    from ragkit.core._ragflow.rag.nlp import rag_tokenizer
+    from ragkit.core._ragflow.rag.nlp.query import FulltextQueryer
 
     table = Table(title="Query rewriting (vector mode)", show_lines=True, border_style="cyan")
     table.add_column("Stage", style="cyan", no_wrap=True)

@@ -15,7 +15,7 @@
 #  limitations under the License.
 #
 
-from ragkit.core.rag.nlp import find_codec
+from ragkit.core._ragflow.rag.nlp import find_codec
 import readability
 import html_text
 import chardet

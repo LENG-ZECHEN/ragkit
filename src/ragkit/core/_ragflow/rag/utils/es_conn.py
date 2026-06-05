@@ -23,10 +23,10 @@ import json
 import copy
 from elasticsearch import Elasticsearch
 from elasticsearch_dsl import UpdateByQuery, Q, Search, Index
-from ragkit.core.rag.utils import singleton
-from ragkit.core.api.utils.file_utils import get_project_base_directory
-from ragkit.core.rag.utils.doc_store_conn import MatchExpr, OrderByExpr, MatchTextExpr, MatchDenseExpr, FusionExpr
-from ragkit.core.rag.nlp import is_english
+from ragkit.core._ragflow.rag.utils import singleton
+from ragkit.core._ragflow.api.utils.file_utils import get_project_base_directory
+from ragkit.core._ragflow.rag.utils.doc_store_conn import MatchExpr, OrderByExpr, MatchTextExpr, MatchDenseExpr, FusionExpr
+from ragkit.core._ragflow.rag.nlp import is_english
 from dotenv import load_dotenv
 
 load_dotenv()

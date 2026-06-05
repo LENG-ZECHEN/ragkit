@@ -17,9 +17,9 @@
 import logging
 import json
 import re
-from ragkit.core.rag.utils.doc_store_conn import MatchTextExpr
+from ragkit.core._ragflow.rag.utils.doc_store_conn import MatchTextExpr
 
-from ragkit.core.rag.nlp import rag_tokenizer, term_weight, synonym
+from ragkit.core._ragflow.rag.nlp import rag_tokenizer, term_weight, synonym
 
 
 class FulltextQueryer:

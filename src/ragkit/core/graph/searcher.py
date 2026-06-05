@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from ragkit.core.embedder import embed_one
-from ragkit.core.rag.utils.es_conn import ESConnection
+from ragkit.core._ragflow.rag.utils.es_conn import ESConnection
 from ragkit.logger import logger
 
 

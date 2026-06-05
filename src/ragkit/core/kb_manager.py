@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ragkit.core.rag.utils.es_conn import ESConnection
+from ragkit.core._ragflow.rag.utils.es_conn import ESConnection
 
 
 @dataclass(frozen=True)

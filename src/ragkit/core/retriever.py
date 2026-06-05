@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ragkit.core.rag.nlp.search_v2 import Dealer
-from ragkit.core.rag.utils.es_conn import ESConnection
+from ragkit.core._ragflow.rag.nlp.search_v2 import Dealer
+from ragkit.core._ragflow.rag.utils.es_conn import ESConnection
 
 
 @dataclass(frozen=True)

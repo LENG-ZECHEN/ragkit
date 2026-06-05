@@ -15,7 +15,7 @@
 #
 import os
 import logging
-from ragkit.core.api.utils.file_utils import get_project_base_directory
+from ragkit.core._ragflow.api.utils.file_utils import get_project_base_directory
 
 # Server
 RAG_CONF_PATH = os.path.join(get_project_base_directory(), "conf")

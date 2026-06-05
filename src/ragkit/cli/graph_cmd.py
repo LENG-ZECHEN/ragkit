@@ -36,7 +36,7 @@ def cmd_graph_build(
     """
     from ragkit.cli import observe
     from ragkit.core.graph.builder import build_graph
-    from ragkit.core.rag.utils.es_conn import ESConnection
+    from ragkit.core._ragflow.rag.utils.es_conn import ESConnection
 
     if debug:
         observe.enable_debug()
@@ -243,7 +243,7 @@ def cmd_graph_clear(
     The chunk index ({kb}) stays intact — only the derived graph layer is removed.
     """
     from ragkit.core.graph.store import open_store
-    from ragkit.core.rag.utils.es_conn import ESConnection
+    from ragkit.core._ragflow.rag.utils.es_conn import ESConnection
 
     if not yes:
         if not typer.confirm(f"Delete graph for '{kb}'? (chunk index stays)"):

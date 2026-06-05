@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from ragkit.core.rag.app.naive import chunk as _naive_chunk
+from ragkit.core._ragflow.rag.app.naive import chunk as _naive_chunk
 from ragkit.logger import logger
 
 

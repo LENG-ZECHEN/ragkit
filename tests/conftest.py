@@ -186,7 +186,7 @@ def fake_es(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Replace ESConnection() with a configurable mock.
 
     We patch the singleton-returning name in es_conn so any module that does
-    `from ragkit.core.rag.utils.es_conn import ESConnection` and then
+    `from ragkit.core._ragflow.rag.utils.es_conn import ESConnection` and then
     `ESConnection()` gets the mock factory.
     """
     fake = MagicMock(name="ESConnection")
@@ -201,7 +201,7 @@ def fake_es(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
     # Patch the factory in every module that imports it lazily.
     monkeypatch.setattr(
-        "ragkit.core.rag.utils.es_conn.ESConnection",
+        "ragkit.core._ragflow.rag.utils.es_conn.ESConnection",
         lambda: fake,
     )
     monkeypatch.setattr("ragkit.core.indexer.ESConnection", lambda: fake)

@@ -274,7 +274,7 @@ def cmd_kb_delete(
     orphan graph data after the chunk index is gone).
     """
     from ragkit.core.kb_manager import delete_kb
-    from ragkit.core.rag.utils.es_conn import ESConnection
+    from ragkit.core._ragflow.rag.utils.es_conn import ESConnection
 
     if not yes:
         confirm = typer.confirm(f"Delete knowledge base '{name}'? This cannot be undone.")
@@ -301,7 +301,7 @@ def cmd_kb_delete(
 def cmd_doctor() -> None:
     """Verify config and connections (ES, API key, dict files)."""
     import os
-    from ragkit.core.rag.utils.es_conn import ESConnection
+    from ragkit.core._ragflow.rag.utils.es_conn import ESConnection
 
     cfg = get_config()
     ok = True
@@ -326,7 +326,7 @@ def cmd_doctor() -> None:
         ok = False
 
     # Tokenizer dict
-    from ragkit.core.api.utils.file_utils import get_project_base_directory
+    from ragkit.core._ragflow.api.utils.file_utils import get_project_base_directory
     dict_path = os.path.join(get_project_base_directory(), "rag", "res", "huqie.txt")
     if os.path.exists(dict_path):
         size_mb = os.path.getsize(dict_path) / 1024 / 1024

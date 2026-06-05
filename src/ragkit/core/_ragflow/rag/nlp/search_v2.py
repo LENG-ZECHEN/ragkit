@@ -18,12 +18,12 @@ import logging
 import re
 from dataclasses import dataclass
 
-from ragkit.core.rag.settings import TAG_FLD, PAGERANK_FLD
-from ragkit.core.rag.utils import rmSpace
-from ragkit.core.rag.nlp import rag_tokenizer, query
+from ragkit.core._ragflow.rag.settings import TAG_FLD, PAGERANK_FLD
+from ragkit.core._ragflow.rag.utils import rmSpace
+from ragkit.core._ragflow.rag.nlp import rag_tokenizer, query
 import numpy as np
-from ragkit.core.rag.utils.doc_store_conn import DocStoreConnection, MatchDenseExpr, FusionExpr, OrderByExpr
-from ragkit.core.rag.nlp.model import generate_embedding, rerank_similarity
+from ragkit.core._ragflow.rag.utils.doc_store_conn import DocStoreConnection, MatchDenseExpr, FusionExpr, OrderByExpr
+from ragkit.core._ragflow.rag.nlp.model import generate_embedding, rerank_similarity
 
 def index_name(uid): return f"{uid}"
 

@@ -24,7 +24,7 @@ from copy import deepcopy
 import onnxruntime as ort
 from huggingface_hub import snapshot_download
 
-from ragkit.core.api.utils.file_utils import get_project_base_directory
+from ragkit.core._ragflow.api.utils.file_utils import get_project_base_directory
 from .operators import *  # noqa: F403
 from .operators import preprocess
 from . import operators

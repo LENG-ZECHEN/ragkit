@@ -20,7 +20,7 @@ import os
 import time
 import re
 from nltk.corpus import wordnet
-from ragkit.core.api.utils.file_utils import get_project_base_directory
+from ragkit.core._ragflow.api.utils.file_utils import get_project_base_directory
 
 
 class Dealer:

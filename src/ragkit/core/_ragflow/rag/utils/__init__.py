@@ -17,7 +17,7 @@
 import os
 import re
 import tiktoken
-from ragkit.core.api.utils.file_utils import get_project_base_directory
+from ragkit.core._ragflow.api.utils.file_utils import get_project_base_directory
 
 def singleton(cls, *args, **kw):
     instances = {}

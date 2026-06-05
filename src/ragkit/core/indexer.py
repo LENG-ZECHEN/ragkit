@@ -11,7 +11,7 @@ import xxhash
 from ragkit.config import get_config
 from ragkit.core.chunker import chunk_file
 from ragkit.core.embedder import embed_batch
-from ragkit.core.rag.utils.es_conn import ESConnection
+from ragkit.core._ragflow.rag.utils.es_conn import ESConnection
 from ragkit.logger import logger
 
 

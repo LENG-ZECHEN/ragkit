@@ -89,8 +89,8 @@ rag = "ragkit.cli.app:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"ragkit.core.rag" = ["res/*.txt", "res/*.trie", "res/deepdoc/*"]
-"ragkit.core" = ["conf/*.json"]
+"ragkit.core._ragflow.rag" = ["res/*.txt", "res/*.trie", "res/deepdoc/*"]
+"ragkit.core._ragflow" = ["conf/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

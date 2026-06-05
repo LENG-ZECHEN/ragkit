@@ -25,7 +25,7 @@ import sys
 from hanziconv import HanziConv
 from nltk import word_tokenize
 from nltk.stem import PorterStemmer, WordNetLemmatizer
-from ragkit.core.api.utils.file_utils import get_project_base_directory
+from ragkit.core._ragflow.api.utils.file_utils import get_project_base_directory
 
 
 class RagTokenizer:

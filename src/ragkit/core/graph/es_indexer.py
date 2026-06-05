@@ -30,7 +30,7 @@ import xxhash
 from ragkit.core.embedder import embed_batch
 from ragkit.core.graph.store import GraphStore
 from ragkit.core.graph.types import Community, Entity
-from ragkit.core.rag.utils.es_conn import ESConnection
+from ragkit.core._ragflow.rag.utils.es_conn import ESConnection
 from ragkit.logger import logger
 
 

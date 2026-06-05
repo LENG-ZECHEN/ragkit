@@ -27,9 +27,9 @@ import numpy as np
 from pypdf import PdfReader as pdf2_read
 
 # from api import settings
-from ragkit.core.api.utils.file_utils import get_project_base_directory
-from ragkit.core.deepdoc.vision import OCR, Recognizer, LayoutRecognizer, TableStructureRecognizer
-from ragkit.core.rag.nlp import rag_tokenizer
+from ragkit.core._ragflow.api.utils.file_utils import get_project_base_directory
+from ragkit.core._ragflow.deepdoc.vision import OCR, Recognizer, LayoutRecognizer, TableStructureRecognizer
+from ragkit.core._ragflow.rag.nlp import rag_tokenizer
 from copy import deepcopy
 from huggingface_hub import snapshot_download
 

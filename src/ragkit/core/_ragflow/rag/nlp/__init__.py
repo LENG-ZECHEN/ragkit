@@ -4,7 +4,7 @@ import copy
 from collections import Counter
 import logging
 import chardet
-from ragkit.core.rag.utils import num_tokens_from_string
+from ragkit.core._ragflow.rag.utils import num_tokens_from_string
 from PIL import Image
 
 def is_english(texts):
