@@ -312,7 +312,7 @@ def test_graph_hits_to_chunks_preserves_rank_and_kind(tmp_path):
     hits = [
         GraphHit(rank=1, kind="chunk", title="r.pdf", content="x", extra={"document_id": "d"}),
         GraphHit(rank=2, kind="entity", title="qwen [model]", content="y", extra={}),
-        GraphHit(rank=3, kind="point", title="Point (rating 9/10)", content="z", extra={"rating": 9}),
+        GraphHit(rank=3, kind="point", title="Point (rating 90/100)", content="z", extra={"rating": 90}),
     ]
     chunks = graph_hits_to_chunks(hits)
     assert [c.rank for c in chunks] == [1, 2, 3]

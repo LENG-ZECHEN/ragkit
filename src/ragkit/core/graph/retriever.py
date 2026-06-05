@@ -372,7 +372,7 @@ def retrieve_global(
         GraphHit(
             rank=i,
             kind="point",
-            title=f"Point (rating {p.rating}/10)",
+            title=f"Point (rating {p.rating}/100)",
             content=p.point,
             extra={"rating": p.rating, "source": p.source},
         )
