@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import random
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
 
@@ -42,6 +43,8 @@ MAP_BATCH_TOKEN_BUDGET = 2000      # max tokens of report text per batch
 RATING_THRESHOLD = 50              # discard points with rating < this (0-100 scale)
 DEFAULT_FINAL_TOP_K = 20           # max rated points sent to the answerer
 SHUFFLE_SEED = 42                  # deterministic for testing
+MAX_CONCURRENT_MAP_CALLS = 5       # bounded ThreadPoolExecutor workers for Map
+                                   # (respects DashScope ~1-2 QPS rate limit)
 
 
 MAP_PROMPT = """\
@@ -302,12 +305,30 @@ def run_global_search(
         [sum(_estimate_tokens(_format_report_for_batch(r)) for r in b) for b in batches],
     )
 
-    # 3) MAP: per-batch LLM scoring.
+    # 3) MAP: per-batch LLM scoring — concurrent with bounded workers.
+    #    Each batch is independent (no shared state), so straight
+    #    ThreadPoolExecutor + as_completed is safe. Order of trace output
+    #    is "completion order" instead of "batch index", which is fine
+    #    because final reduce is rating-sorted anyway.
     all_points: list[RatedPoint] = []
-    for i, batch in enumerate(batches, start=1):
-        rir = _map_rate_batch(question, batch)
-        observe.trace_global_map_batch(i, len(batch), rir)
-        all_points.extend(rir)
+    with ThreadPoolExecutor(
+        max_workers=min(MAX_CONCURRENT_MAP_CALLS, len(batches))
+    ) as executor:
+        futures = {
+            executor.submit(_map_rate_batch, question, batch): (i, batch)
+            for i, batch in enumerate(batches, start=1)
+        }
+        for future in as_completed(futures):
+            i, batch = futures[future]
+            try:
+                rir = future.result()
+            except Exception as e:
+                # Per-batch failure must NOT abort the whole search —
+                # other batches may still contribute.
+                logger.warning(f"Global map batch {i} raised: {e}")
+                rir = []
+            observe.trace_global_map_batch(i, len(batch), rir)
+            all_points.extend(rir)
 
     # 4) REDUCE: filter + top-K.
     final = _reduce_rated_points(

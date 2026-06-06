@@ -18,6 +18,13 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+# Bounded worker pool for per-community summarization. Each community
+# mutates only its own object (no shared graph writes), so straight
+# concurrency is safe. 5 respects DashScope's rate limit.
+MAX_CONCURRENT_SUMMARIES = 5
 
 from openai import OpenAI
 
@@ -221,18 +228,39 @@ def summarize_all(
     communities = store.all_communities()
     targets = communities if max_communities is None else communities[:max_communities]
 
+    if not targets:
+        store.set_communities(communities)
+        return 0
+
+    # Concurrent summarization — each community mutates its own object,
+    # no shared graph writes, so direct ThreadPoolExecutor is safe.
+    # `store` is only READ inside generate_community_report (to look up
+    # entity descriptions), which is concurrent-read-safe for our use.
     failures = 0
-    for i, c in enumerate(targets, start=1):
-        generate_community_report(c, store)
-        if not c.summary and not c.title and not c.findings:
-            failures += 1
-        if progress_cb:
-            progress_cb("summarizing", i, len(targets))
-        logger.debug(
-            f"Community {c.id} (L{c.level}): "
-            f"title={c.title!r}, summary={len(c.summary)} chars, "
-            f"{len(c.findings)} findings"
-        )
+    with ThreadPoolExecutor(
+        max_workers=min(MAX_CONCURRENT_SUMMARIES, len(targets))
+    ) as executor:
+        futures = {
+            executor.submit(generate_community_report, c, store): c
+            for c in targets
+        }
+        completed = 0
+        for future in as_completed(futures):
+            completed += 1
+            c = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                logger.warning(f"Summarization failed for community {c.id}: {e}")
+            if not c.summary and not c.title and not c.findings:
+                failures += 1
+            if progress_cb:
+                progress_cb("summarizing", completed, len(targets))
+            logger.debug(
+                f"Community {c.id} (L{c.level}): "
+                f"title={c.title!r}, summary={len(c.summary)} chars, "
+                f"{len(c.findings)} findings"
+            )
 
     store.set_communities(communities)
     return failures

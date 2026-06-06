@@ -74,3 +74,6 @@ PROJECT_CAPABILITY_REPORT.md
 PROJECT_CAPABILITY_REPORT_zh.md
 USER_GUIDE.md
 USER_GUIDE_zh.md
+
+# Local-only analysis documents (generated outside this session, kept local)
+docs/

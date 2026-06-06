@@ -5,6 +5,7 @@ This is the function the indexer (and `rag graph build` CLI) call.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Iterable
 
 from ragkit.core.graph.community import detect_communities
@@ -14,6 +15,11 @@ from ragkit.core.graph.extractor import extract_from_text
 from ragkit.core.graph.store import GraphStore, NetworkXGraphStore, open_store
 from ragkit.core.graph.summarizer import summarize_all
 from ragkit.logger import logger
+
+
+# Bounded worker pool for per-chunk LLM extraction. DashScope rate limit
+# is the binding constraint; 5 is a safe default for small-to-medium batches.
+MAX_CONCURRENT_EXTRACTIONS = 5
 
 
 def build_graph(
@@ -53,13 +59,53 @@ def build_graph(
     from ragkit.cli import observe
 
     # ---- 1. extract entities + relations per chunk -------------------
-    extraction_failures = 0
-    for i, chunk in enumerate(chunks, start=1):
-        if progress_cb:
-            progress_cb("extracting", i, total)
+    # Two-stage to make this concurrent-safe:
+    #   Stage A: concurrent LLM extraction (pure function, no graph mutation)
+    #   Stage B: serial merge into the graph (NetworkX is NOT thread-safe;
+    #            upsert_entity/relation mutate shared store state)
+
+    def _extract_one(chunk: dict) -> tuple[str, str, object]:
+        """Stage-A worker: call LLM, return (chunk_id, text, result).
+        Pure — no shared-state writes."""
         text = chunk.get("content_with_weight", "")
-        chunk_id = str(chunk.get("id", f"chunk-{i}"))
-        result = extract_from_text(text, chunk_id)
+        chunk_id = str(chunk.get("id", ""))
+        return chunk_id, text, extract_from_text(text, chunk_id)
+
+    extraction_results: list[tuple[str, str, object]] = []
+    with ThreadPoolExecutor(
+        max_workers=min(MAX_CONCURRENT_EXTRACTIONS, total)
+    ) as executor:
+        # Preserve the original chunk numbering for fallback chunk_id only.
+        numbered_chunks = list(enumerate(chunks, start=1))
+        futures = {
+            executor.submit(_extract_one, chunk): i for i, chunk in numbered_chunks
+        }
+        completed = 0
+        for future in as_completed(futures):
+            completed += 1
+            if progress_cb:
+                progress_cb("extracting", completed, total)
+            i = futures[future]
+            try:
+                chunk_id, text, result = future.result()
+            except Exception as e:
+                # Per-chunk failure: log + count as failure, continue with others
+                logger.warning(f"Extraction failed for chunk #{i}: {e}")
+                chunk_id, text, result = (
+                    str(numbered_chunks[i - 1][1].get("id", f"chunk-{i}")),
+                    numbered_chunks[i - 1][1].get("content_with_weight", ""),
+                    None,
+                )
+            extraction_results.append((chunk_id, text, result))
+
+    # Stage B: serial merge — guaranteed thread-safe (main thread only)
+    extraction_failures = 0
+    for chunk_id, text, result in extraction_results:
+        if result is None:
+            # Extraction threw — treat as failure if chunk had content
+            if text.strip():
+                extraction_failures += 1
+            continue
         observe.trace_chunk_extraction(chunk_id, len(result.entities), len(result.relations))
         for entity in result.entities:
             store.upsert_entity(entity)

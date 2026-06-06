@@ -256,3 +256,78 @@ def test_run_global_search_constants_are_reasonable():
     assert 0 < RATING_THRESHOLD <= 100
     assert MAP_BATCH_TOKEN_BUDGET >= 500
     assert DEFAULT_FINAL_TOP_K >= 5
+
+
+# ===========================================================================
+# Concurrency tests — verify that Map phase actually runs in parallel
+# ===========================================================================
+
+
+def test_map_phase_runs_concurrently(fake_openai, monkeypatch):
+    """Wall-clock time for N slow batches should be ~max_one_batch, NOT N*one.
+
+    Mocks the LLM call to sleep 0.5s. With 3 batches under serial execution
+    total time ≈ 1.5s; under concurrent execution (max_workers=5) ≈ 0.5s.
+    Assert under 1.0s to give CI headroom (real concurrent should be 0.5-0.6s).
+    """
+    import time
+
+    def slow_create(**kwargs):
+        time.sleep(0.5)  # simulate LLM latency
+        mock_msg = type("M", (), {"content": json.dumps({
+            "points": [{"point": "p", "rating": 90}]
+        })})()
+        mock_choice = type("C", (), {"message": mock_msg})()
+        return type("R", (), {"choices": [mock_choice]})()
+
+    monkeypatch.setattr(
+        fake_openai.chat.completions, "create", slow_create
+    )
+
+    # Force 3 separate batches by making each report exceed half the budget.
+    big_text = "x" * (MAP_BATCH_TOKEN_BUDGET * 3)  # each ~6000 char ≈ 1500 tok
+    reports = [_report(i, big_text) for i in range(3)]
+
+    start = time.monotonic()
+    out = run_global_search("test question", reports)
+    elapsed = time.monotonic() - start
+
+    # 3 batches × 0.5s serial = 1.5s; concurrent ≈ 0.5s.
+    # 1.0s ceiling proves we're concurrent (with CI/macOS scheduler slack).
+    assert elapsed < 1.0, (
+        f"Map phase took {elapsed:.2f}s — expected ~0.5s under concurrent "
+        f"execution (3 batches × 0.5s serial would be 1.5s). "
+        f"Concurrency may have regressed to serial."
+    )
+    assert len(out) >= 1
+
+
+def test_map_phase_one_batch_failure_does_not_abort_others(fake_openai, monkeypatch):
+    """A single batch raising must NOT lose other batches' results.
+
+    This guards the per-future try/except in run_global_search.
+    """
+    call_count = {"n": 0}
+
+    def flaky_create(**kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 2:  # second batch fails
+            raise RuntimeError("simulated transient API error")
+        mock_msg = type("M", (), {"content": json.dumps({
+            "points": [{"point": f"survived-{call_count['n']}", "rating": 80}]
+        })})()
+        mock_choice = type("C", (), {"message": mock_msg})()
+        return type("R", (), {"choices": [mock_choice]})()
+
+    monkeypatch.setattr(
+        fake_openai.chat.completions, "create", flaky_create
+    )
+
+    big_text = "x" * (MAP_BATCH_TOKEN_BUDGET * 3)
+    reports = [_report(i, big_text) for i in range(3)]
+
+    out = run_global_search("q", reports)
+
+    # 2 surviving batches should each contribute 1 point.
+    assert len(out) == 2
+    assert all(p.point.startswith("survived-") for p in out)
