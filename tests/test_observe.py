@@ -267,6 +267,55 @@ def _run_with_timed(label: str, noop: bool = False):
 
 
 # ==========================================================================
+# measure() context manager — always-on timing into a dict
+# ==========================================================================
+
+
+def test_measure_writes_elapsed_ms_into_dict():
+    """measure(key, into) must populate into[key] with a non-negative float
+    representing milliseconds elapsed inside the block."""
+    d: dict[str, float] = {}
+    with observe.measure("foo", d):
+        pass
+    assert "foo" in d
+    assert isinstance(d["foo"], float)
+    assert d["foo"] >= 0.0
+
+
+def test_measure_is_always_active_even_with_debug_off():
+    """Unlike timed(), measure() does NOT depend on the debug flag —
+    eval traces must be populated regardless."""
+    observe.disable_debug()
+    d: dict[str, float] = {}
+    with observe.measure("k", d):
+        pass
+    assert "k" in d
+
+
+def test_measure_records_meaningful_elapsed():
+    """For a brief sleep, elapsed_ms should be roughly the sleep duration
+    (with generous CI tolerance) and clearly > 0."""
+    import time as _t
+    d: dict[str, float] = {}
+    with observe.measure("slept", d):
+        _t.sleep(0.01)  # 10ms
+    # At least 5ms should be observable on any sane system; cap upper to catch
+    # accidental seconds-units bugs.
+    assert d["slept"] >= 5.0
+    assert d["slept"] < 2000.0
+
+
+def test_measure_records_on_exception():
+    """The finally block must run — exception inside the block still records."""
+    d: dict[str, float] = {}
+    with pytest.raises(RuntimeError):
+        with observe.measure("boom", d):
+            raise RuntimeError("simulated")
+    assert "boom" in d
+    assert d["boom"] >= 0.0
+
+
+# ==========================================================================
 # references_table_with_kind — default-mode formatter for local mode
 # ==========================================================================
 

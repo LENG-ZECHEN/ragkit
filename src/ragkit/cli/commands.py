@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
@@ -12,6 +14,117 @@ from rich.table import Table
 from ragkit.cli.ui import console, error, info, kv_table, success, warn
 from ragkit.config import get_config
 from ragkit.core.kb_validator import validate_kb_name
+
+
+# --------------------------------------------------------------------------
+# Eval trace helpers (Phase 0 of the eval instrumentation layer).
+# --------------------------------------------------------------------------
+
+
+def _retrieved_items_from_chunks(chunks: list, hits: list | None) -> list[dict[str, Any]]:
+    """Build the ``retrieved`` array for an EvalTrace.
+
+    Prefers GraphHit data when available (so ``kind`` is accurate); falls back
+    to RetrievedChunk data (kind always "chunk") for vector mode.
+    """
+    if hits is not None:
+        out: list[dict[str, Any]] = []
+        for h in hits:
+            extra = getattr(h, "extra", {}) or {}
+            score = float(
+                extra.get("similarity",
+                          extra.get("rating",
+                                    extra.get("weight",
+                                              extra.get("rank", 0.0)))) or 0.0
+            )
+            out.append({
+                "chunk_id": str(extra.get("document_id") or extra.get("name") or h.title),
+                "rank": int(h.rank),
+                "score": score,
+                "kind": h.kind,
+            })
+        return out
+    return [
+        {
+            "chunk_id": c.document_id,
+            "rank": int(c.rank),
+            "score": float(c.similarity),
+            "kind": "chunk",
+        }
+        for c in chunks
+    ]
+
+
+def _emit_eval_trace(
+    *,
+    question: str,
+    kb: str,
+    mode: str,
+    top_k: int,
+    level: int | None,
+    chunks: list,
+    hits: list | None,
+    timing: dict[str, float],
+    answer: str | None,
+    llm_calls: int,
+    eval_out: Path | None,
+) -> None:
+    """Assemble + emit the EvalTrace JSON. Internal helper used by cmd_ask
+    and cmd_retrieve.
+
+    Output: if ``eval_out`` is given, writes to that file; else prints a
+    compact one-line JSON to stdout (so a downstream consumer can pipe it
+    straight into ``jq``).
+    """
+    from ragkit import eval_context
+    from ragkit.core.graph import global_search as gs
+    from ragkit.core.graph import retriever as graph_ret
+
+    defaults: dict[str, Any] = {
+        "vector_similarity_weight": 0.6,
+        "similarity_threshold": 0.1,
+        "chunk_token_num": 128,
+        "local_top_k_seeds": graph_ret.LOCAL_TOP_K_SEEDS,
+        "local_top_k_text_units": graph_ret.LOCAL_TOP_K_TEXT_UNITS,
+        "local_top_k_communities": graph_ret.LOCAL_TOP_K_COMMUNITIES,
+        "local_top_k_entities": graph_ret.LOCAL_TOP_K_ENTITIES,
+        "local_top_k_relations": graph_ret.LOCAL_TOP_K_RELATIONS,
+        "global_top_k_reports": graph_ret.GLOBAL_TOP_K_REPORTS,
+        "map_batch_token_budget": gs.MAP_BATCH_TOKEN_BUDGET,
+        "rating_threshold": gs.RATING_THRESHOLD,
+        "default_final_top_k": gs.DEFAULT_FINAL_TOP_K,
+    }
+
+    # Cost is best-effort. tokens_in: a rough proxy from the prompt the
+    # retriever sees (question chars / 2). tokens_out: CJK-friendly heuristic.
+    answer_str = answer or ""
+    cost: dict[str, Any] = {
+        "llm_calls": int(llm_calls),
+        "embedding_calls": 1 if mode in ("vector", "local", "global") else 0,
+        "tokens_in": len(question) // 2,
+        "tokens_out": len(answer_str) // 4,
+        "est_cost_usd": 0.0,
+    }
+
+    trace = eval_context.build_trace(
+        question=question,
+        kb=kb,
+        mode=mode,
+        top_k=top_k,
+        level=level,
+        retrieved=_retrieved_items_from_chunks(chunks, hits),  # type: ignore[arg-type]
+        timing=timing,  # type: ignore[arg-type]
+        cost=cost,  # type: ignore[arg-type]
+        answer=answer,
+        defaults=defaults,  # type: ignore[arg-type]
+    )
+
+    if eval_out is not None:
+        eval_out.write_text(json.dumps(trace, ensure_ascii=False, indent=2))
+    else:
+        # Plain print bypasses rich markup/highlighting so the JSON is
+        # consumer-clean (one line, no ANSI). Tests parse this directly.
+        print(json.dumps(trace, ensure_ascii=False))
 
 
 def cmd_index(
@@ -122,6 +235,20 @@ def cmd_ask(
         help="Show internal pipeline trace (query rewriting, kNN candidates, "
              "map/reduce intermediates, ...). For tuning + debugging.",
     ),
+    param: list[str] = typer.Option(
+        [], "--param",
+        help="Override a tunable parameter for this run, e.g. "
+             "--param vector_similarity_weight=0.3 (repeatable).",
+    ),
+    eval_trace: bool = typer.Option(
+        False, "--eval-trace",
+        help="Emit structured JSON trace (question, retrieved chunks, timing, "
+             "cost, params) to stdout or --eval-out.",
+    ),
+    eval_out: Path = typer.Option(
+        None, "--eval-out",
+        help="Write --eval-trace JSON to this file (default: stdout).",
+    ),
 ) -> None:
     """Ask a single question. Streams the answer to stdout, then prints citations.
 
@@ -132,6 +259,7 @@ def cmd_ask(
       global  — Map-Reduce over community reports (best for thematic queries)
     """
     validate_kb_name(kb)
+    from ragkit import eval_context
     from ragkit.cli import observe
     from ragkit.core.generator import generate
     from ragkit.core.retriever import retrieve
@@ -139,25 +267,42 @@ def cmd_ask(
     if debug:
         observe.enable_debug()
 
+    # Install --param overrides into the eval-context store. ValueError from
+    # malformed input propagates: Typer will print the message and exit non-zero.
+    eval_context.set_overrides(param)
+
     valid_modes = {"vector", "local", "global"}
     if mode not in valid_modes:
         error(f"Invalid mode '{mode}'. Choose from: {', '.join(sorted(valid_modes))}")
         raise typer.Exit(code=2)
 
+    # Per-call mutable buckets for timing + cost. Always populated when
+    # --eval-trace is set; cheap to populate unconditionally.
+    timing: dict[str, float] = {
+        "embed_ms": 0.0,
+        "retrieve_es_ms": 0.0,
+        "rerank_ms": 0.0,
+        "generate_ms": 0.0,
+        "total_ms": 0.0,
+    }
+    hits = None  # populated only for local/global modes
+    t_start = time.monotonic()
+
     try:
-        if mode == "vector":
-            chunks = retrieve(question, kb_name=kb, top_k=top_k)
-        else:
-            from ragkit.core.graph.retriever import (
-                graph_hits_to_chunks,
-                retrieve_global,
-                retrieve_local,
-            )
-            if mode == "local":
-                hits = retrieve_local(question, kb_name=kb, top_k=top_k)
-            else:  # global
-                hits = retrieve_global(question, kb_name=kb, top_k=top_k, level=level)
-            chunks = graph_hits_to_chunks(hits)
+        with observe.measure("retrieve_es_ms", timing):
+                if mode == "vector":
+                    chunks = retrieve(question, kb_name=kb, top_k=top_k)
+                else:
+                    from ragkit.core.graph.retriever import (
+                        graph_hits_to_chunks,
+                        retrieve_global,
+                        retrieve_local,
+                    )
+                    if mode == "local":
+                        hits = retrieve_local(question, kb_name=kb, top_k=top_k)
+                    else:  # global
+                        hits = retrieve_global(question, kb_name=kb, top_k=top_k, level=level)
+                    chunks = graph_hits_to_chunks(hits)
     except Exception as e:
         error(f"Retrieval failed ({mode}): {e}")
         raise typer.Exit(code=2)
@@ -174,6 +319,14 @@ def cmd_ask(
             "references": [c.as_dict() for c in chunks],
         }
         console.print_json(json.dumps(payload, ensure_ascii=False))
+        if eval_trace:
+            timing["total_ms"] = (time.monotonic() - t_start) * 1000.0
+            _emit_eval_trace(
+                question=question, kb=kb, mode=mode, top_k=top_k, level=level,
+                chunks=chunks, hits=hits, timing=timing,
+                answer=answer, llm_calls=1,
+                eval_out=eval_out,
+            )
         return
 
     if not chunks:
@@ -181,15 +334,22 @@ def cmd_ask(
     else:
         console.print(f"\n[dim]Retrieved {len(chunks)} chunk(s) from kb=[cyan]{kb}[/cyan][/dim]\n")
 
-    for event in generate(question, chunks):
-        if event.type == "content":
-            console.print(event.text, end="", soft_wrap=True, highlight=False)
-        elif event.type == "thinking" and show_thinking:
-            console.print(event.text, end="", style="dim italic", soft_wrap=True, highlight=False)
-        elif event.type == "error":
-            console.print()
-            error(f"Generation error: {event.text}")
-            raise typer.Exit(code=3)
+    # Buffer the generated answer so we can include it in the eval trace.
+    answer_parts: list[str] = []
+    llm_calls = 0
+    with observe.measure("generate_ms", timing):
+        for event in generate(question, chunks):
+            if event.type == "content":
+                answer_parts.append(event.text)
+                console.print(event.text, end="", soft_wrap=True, highlight=False)
+            elif event.type == "thinking" and show_thinking:
+                console.print(event.text, end="", style="dim italic", soft_wrap=True, highlight=False)
+            elif event.type == "done":
+                llm_calls += 1
+            elif event.type == "error":
+                console.print()
+                error(f"Generation error: {event.text}")
+                raise typer.Exit(code=3)
 
     console.print()
     if chunks:
@@ -209,6 +369,15 @@ def cmd_ask(
             # `hits` (GraphHit list) is in scope from above.
             console.print(observe.references_table_with_kind(hits))
 
+    if eval_trace:
+        timing["total_ms"] = (time.monotonic() - t_start) * 1000.0
+        _emit_eval_trace(
+            question=question, kb=kb, mode=mode, top_k=top_k, level=level,
+            chunks=chunks, hits=hits, timing=timing,
+            answer="".join(answer_parts), llm_calls=llm_calls,
+            eval_out=eval_out,
+        )
+
 
 def cmd_retrieve(
     question: str = typer.Argument(..., help="Question to retrieve for."),
@@ -219,27 +388,65 @@ def cmd_retrieve(
         "--debug",
         help="Show query rewriting trace, ES candidates count, rerank timing, ...",
     ),
+    param: list[str] = typer.Option(
+        [], "--param",
+        help="Override a tunable parameter for this run, e.g. "
+             "--param vector_similarity_weight=0.3 (repeatable).",
+    ),
+    eval_trace: bool = typer.Option(
+        False, "--eval-trace",
+        help="Emit structured JSON trace (question, retrieved chunks, timing, "
+             "cost, params) to stdout or --eval-out.",
+    ),
+    eval_out: Path = typer.Option(
+        None, "--eval-out",
+        help="Write --eval-trace JSON to this file (default: stdout).",
+    ),
 ) -> None:
     """Run retrieval only (no LLM call) — useful for tuning."""
     validate_kb_name(kb)
+    from ragkit import eval_context
     from ragkit.cli import observe
     from ragkit.core.retriever import retrieve
 
     if debug:
         observe.enable_debug()
 
-    chunks = retrieve(question, kb_name=kb, top_k=top_k)
-    if not chunks:
+    eval_context.set_overrides(param)
+
+    timing: dict[str, float] = {
+        "embed_ms": 0.0,
+        "retrieve_es_ms": 0.0,
+        "rerank_ms": 0.0,
+        "generate_ms": 0.0,
+        "total_ms": 0.0,
+    }
+    with observe.measure("total_ms", timing):
+        with observe.measure("retrieve_es_ms", timing):
+            chunks = retrieve(question, kb_name=kb, top_k=top_k)
+
+    if not chunks and not eval_trace:
         warn("No matches.")
         return
 
-    for c in chunks:
-        console.rule(
-            f"[cyan]#{c.rank}[/cyan] {c.document_name} · "
-            f"sim={c.similarity:.3f} (vec={c.vector_similarity:.3f}, term={c.term_similarity:.3f})"
+    if chunks:
+        for c in chunks:
+            console.rule(
+                f"[cyan]#{c.rank}[/cyan] {c.document_name} · "
+                f"sim={c.similarity:.3f} (vec={c.vector_similarity:.3f}, term={c.term_similarity:.3f})"
+            )
+            console.print(c.content)
+        console.rule()
+    elif eval_trace:
+        warn("No matches.")
+
+    if eval_trace:
+        _emit_eval_trace(
+            question=question, kb=kb, mode="vector", top_k=top_k, level=None,
+            chunks=chunks, hits=None, timing=timing,
+            answer=None, llm_calls=0,
+            eval_out=eval_out,
         )
-        console.print(c.content)
-    console.rule()
 
 
 def cmd_kb_list() -> None:

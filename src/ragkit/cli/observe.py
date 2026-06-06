@@ -114,6 +114,28 @@ def timed(label: str):
         console.print(f"  [dim]⏱  {label}: {elapsed_ms:.0f}ms[/dim]")
 
 
+@contextmanager
+def measure(key: str, into: dict):
+    """Time a block and write elapsed milliseconds into ``into[key]``.
+
+    Always active (independent of the debug flag): the eval trace must be
+    populated regardless of whether the user passed ``--debug``. The cost is
+    one ``time.monotonic()`` pair and one dict assignment per call.
+
+    Usage::
+
+        timing: dict[str, float] = {}
+        with observe.measure("retrieve_es_ms", timing):
+            chunks = retrieve(...)
+        # timing["retrieve_es_ms"] now holds the elapsed time in ms.
+    """
+    start = time.monotonic()
+    try:
+        yield
+    finally:
+        into[key] = (time.monotonic() - start) * 1000.0
+
+
 # ===========================================================================
 # Section 1 — DEFAULT-mode visualizations
 # (always emit; useful during normal operation)

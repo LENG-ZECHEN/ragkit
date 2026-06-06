@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ragkit import eval_context
 from ragkit.core._ragflow.rag.nlp.search_v2 import Dealer
 from ragkit.core._ragflow.rag.utils.es_conn import ESConnection
 
@@ -63,6 +64,11 @@ def retrieve(
     if not question.strip():
         raise ValueError("question must be a non-empty string")
 
+    # Read overrides from the active eval context. In the no-override common
+    # case this is a single dict.get() against an empty dict — effectively free.
+    vsw = eval_context.get("vector_similarity_weight", vector_similarity_weight)
+    st = eval_context.get("similarity_threshold", similarity_threshold)
+
     # Observability — no-ops unless observe.enable_debug() was called.
     from ragkit.cli import observe
 
@@ -77,8 +83,8 @@ def retrieve(
             kb_ids=None,
             page=1,
             page_size=top_k,
-            similarity_threshold=similarity_threshold,
-            vector_similarity_weight=vector_similarity_weight,
+            similarity_threshold=st,
+            vector_similarity_weight=vsw,
         )
 
     out: list[RetrievedChunk] = []

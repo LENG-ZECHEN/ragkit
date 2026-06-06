@@ -34,6 +34,7 @@ from typing import Any
 
 from openai import OpenAI
 
+from ragkit import eval_context
 from ragkit.config import get_config
 from ragkit.logger import logger
 
@@ -294,12 +295,18 @@ def run_global_search(
     if not community_reports:
         return []
 
+    # Eval-context overrides take precedence over caller-supplied kwargs.
+    # No-override path is a single dict.get() against an empty dict.
+    eff_max_tokens = eval_context.get("map_batch_token_budget", max_tokens_per_batch)
+    eff_rating_threshold = eval_context.get("rating_threshold", rating_threshold)
+    eff_final_top_k = eval_context.get("default_final_top_k", final_top_k)
+
     # 1) Deterministic shuffle to reduce ordering bias when LLM sees adjacent
     #    reports first.
     shuffled = _shuffle_with_seed(community_reports)
 
     # 2) Pack into batches under the token budget.
-    batches = _batch_by_token_count(shuffled, max_tokens=max_tokens_per_batch)
+    batches = _batch_by_token_count(shuffled, max_tokens=eff_max_tokens)
     observe.trace_global_batches(
         [len(b) for b in batches],
         [sum(_estimate_tokens(_format_report_for_batch(r)) for r in b) for b in batches],
@@ -333,8 +340,8 @@ def run_global_search(
     # 4) REDUCE: filter + top-K.
     final = _reduce_rated_points(
         all_points,
-        threshold=rating_threshold,
-        top_k=final_top_k,
+        threshold=eff_rating_threshold,
+        top_k=eff_final_top_k,
     )
-    observe.trace_global_reduce(len(all_points), len(final), rating_threshold)
+    observe.trace_global_reduce(len(all_points), len(final), eff_rating_threshold)
     return final

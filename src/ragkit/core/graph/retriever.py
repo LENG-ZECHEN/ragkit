@@ -29,6 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ragkit import eval_context
 from ragkit.core.graph.global_search import (
     RatedPoint,
     run_global_search,
@@ -272,10 +273,19 @@ def retrieve_local(
     _validate_args(question, kb_name)
     store = store or open_store(kb_name)
 
+    # Read eval-context overrides at the top, then thread the resolved values
+    # through the rest of the function. In the no-override common case each
+    # call is a single dict.get() on an empty dict — no allocation.
+    seeds_k = eval_context.get("local_top_k_seeds", LOCAL_TOP_K_SEEDS)
+    text_units_k = eval_context.get("local_top_k_text_units", LOCAL_TOP_K_TEXT_UNITS)
+    communities_k = eval_context.get("local_top_k_communities", LOCAL_TOP_K_COMMUNITIES)
+    entities_k = eval_context.get("local_top_k_entities", LOCAL_TOP_K_ENTITIES)
+    relations_k = eval_context.get("local_top_k_relations", LOCAL_TOP_K_RELATIONS)
+
     # ---- 1. Find seed entities via vector search ----
     with observe.timed("local · seed entity kNN"):
         seed_docs = search_entities_by_vector(
-            kb_name, question, top_k=LOCAL_TOP_K_SEEDS
+            kb_name, question, top_k=seeds_k
         )
     if not seed_docs:
         logger.info(f"Local search: no seed entities found for query in {kb_name}_graph")
@@ -283,16 +293,16 @@ def retrieve_local(
     observe.trace_seed_entities(seed_docs)
 
     # ---- 2. Multi-source candidate collection ----
-    text_units = _collect_text_units(seed_docs, kb_name, top_k=min(top_k, LOCAL_TOP_K_TEXT_UNITS))
+    text_units = _collect_text_units(seed_docs, kb_name, top_k=min(top_k, text_units_k))
     observe.trace_stream_summary("text units", text_units)
 
-    communities = _collect_communities(seed_docs, kb_name, top_k=min(top_k, LOCAL_TOP_K_COMMUNITIES))
+    communities = _collect_communities(seed_docs, kb_name, top_k=min(top_k, communities_k))
     observe.trace_stream_summary("communities", communities)
 
-    neighbors = _collect_neighbor_entities(seed_docs, store, top_k=LOCAL_TOP_K_ENTITIES)
+    neighbors = _collect_neighbor_entities(seed_docs, store, top_k=entities_k)
     observe.trace_stream_summary("neighbor entities", neighbors)
 
-    relations = _collect_relations(seed_docs, store, top_k=LOCAL_TOP_K_RELATIONS)
+    relations = _collect_relations(seed_docs, store, top_k=relations_k)
     observe.trace_stream_summary("relations", relations)
 
     # ---- 3. Concatenate streams with renumbered ranks ----
@@ -342,10 +352,13 @@ def retrieve_global(
 
     _validate_args(question, kb_name)
 
+    # Read eval-context overrides at the top. No-override path is one dict.get().
+    reports_k = eval_context.get("global_top_k_reports", GLOBAL_TOP_K_REPORTS)
+
     # 1. Candidate community reports.
     with observe.timed("global · community kNN"):
         community_docs = search_communities_by_vector(
-            kb_name, question, level=level, top_k=GLOBAL_TOP_K_REPORTS
+            kb_name, question, level=level, top_k=reports_k
         )
     if not community_docs:
         logger.info(f"Global search: no community reports for query in {kb_name}_graph")
