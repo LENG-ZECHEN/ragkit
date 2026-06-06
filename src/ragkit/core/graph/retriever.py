@@ -136,6 +136,7 @@ def _collect_text_units(
             title=chunk.get("docnm_kwd", "").split("/")[-1] or "(unknown)",
             content=chunk.get("content_with_weight", ""),
             extra={
+                "chunk_id": chunk_id,
                 "document_id": chunk.get("doc_id", ""),
                 "source_hits": chunk_hits[chunk_id],
             },

@@ -1,0 +1,12 @@
+# E1: BM25 vs Dense mixing ratio sweep
+# 5 vsw × 3 modes × 20 questions = 300 rag ask calls
+# Estimated: 10 min @ concurrency=5, ¥3-5 DashScope spend
+experiment: e1_vsw
+dataset: evals/dataset.jsonl
+output_dir: evals/results/{timestamp}/e1_vsw
+modes: [vector, local, global]
+kb: test
+top_k: 5
+grid:
+  vector_similarity_weight: [0.0, 0.3, 0.5, 0.7, 0.95]
+  similarity_threshold: [0.1]

@@ -1,0 +1,12 @@
+# E2: Top-K diminishing-return curve
+# 3 top_k × 3 modes × 20 questions = 180 rag ask calls
+# Estimated: 6 min @ concurrency=5, ¥1-2 DashScope spend
+experiment: e2_topk
+dataset: evals/dataset.jsonl
+output_dir: evals/results/{timestamp}/e2_topk
+modes: [vector, local, global]
+kb: test
+top_k_values: [3, 5, 10]   # special key: each value becomes the --top-k CLI arg
+grid:
+  vector_similarity_weight: [0.6]
+  similarity_threshold: [0.1]

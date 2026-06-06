@@ -1,0 +1,3 @@
+{"category": "factual", "gold_answer": "示例答案:世运电路成立于 2005 年(占位文本,非真实数据)。", "ground_truth_chunk_ids": ["chunk-example-001", "chunk-example-002"], "id": "fact-example-001", "notes": "EXAMPLE - DELETE BEFORE USE", "question": "世运电路的成立时间是哪一年?"}
+{"category": "passage_quoted", "gold_answer": "示例答案:报告原文称“公司在高多层板领域具备领先优势”(占位引用,非真实数据)。", "ground_truth_chunk_ids": ["chunk-example-007"], "id": "quote-example-001", "notes": "EXAMPLE - DELETE BEFORE USE", "question": "报告中如何描述世运电路在高多层板领域的竞争地位?请引用原文。"}
+{"category": "refusal", "gold_answer": null, "ground_truth_chunk_ids": [], "id": "refuse-example-001", "notes": "EXAMPLE - DELETE BEFORE USE — answer should be a refusal because the report does not cover Mars colonization.", "question": "世运电路在火星殖民项目中扮演什么角色?"}

@@ -21,10 +21,12 @@ class RetrievedChunk:
     similarity: float
     vector_similarity: float
     term_similarity: float
+    chunk_id: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "id": self.rank,
+            "chunk_id": self.chunk_id,
             "document_id": self.document_id,
             "document_name": self.document_name,
             "content_with_weight": self.content,
@@ -95,6 +97,7 @@ def retrieve(
         out.append(
             RetrievedChunk(
                 rank=i,
+                chunk_id=chunk.get("chunk_id", ""),
                 document_id=chunk.get("doc_id", ""),
                 document_name=docnm,
                 content=chunk.get("content_with_weight", ""),

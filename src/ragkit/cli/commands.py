@@ -38,7 +38,7 @@ def _retrieved_items_from_chunks(chunks: list, hits: list | None) -> list[dict[s
                                               extra.get("rank", 0.0)))) or 0.0
             )
             out.append({
-                "chunk_id": str(extra.get("document_id") or extra.get("name") or h.title),
+                "chunk_id": str(extra.get("chunk_id") or extra.get("name") or h.title),
                 "rank": int(h.rank),
                 "score": score,
                 "kind": h.kind,
@@ -46,7 +46,7 @@ def _retrieved_items_from_chunks(chunks: list, hits: list | None) -> list[dict[s
         return out
     return [
         {
-            "chunk_id": c.document_id,
+            "chunk_id": c.chunk_id,
             "rank": int(c.rank),
             "score": float(c.similarity),
             "kind": "chunk",
