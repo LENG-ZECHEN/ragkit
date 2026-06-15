@@ -83,6 +83,7 @@ session-management, and HTTP layers are gone; what's left is the RAG pipeline it
 
 ```bash
 # Clone and enter the project
+git clone https://github.com/LENG-ZECHEN/ragkit.git
 cd ragkit
 
 # Create venv
@@ -206,7 +207,7 @@ pytest --cov=ragkit --cov-report=term-missing
 pytest -m unit
 ```
 
-The test suite currently has ~297 behavior-focused tests (run `pytest --collect-only` for the live count). It covers:
+The test suite currently has 452 behavior-focused tests (run `pytest --collect-only` for the live count). It covers:
 
 **Vector pipeline**
 - **config** — env-var precedence, missing-key contract
@@ -236,6 +237,8 @@ ragkit/
 │   ├── cli/                CLI layer (typer + rich + prompt_toolkit)
 │   │   ├── app.py
 │   │   ├── commands.py
+│   │   ├── graph_cmd.py
+│   │   ├── observe.py
 │   │   ├── repl.py
 │   │   └── ui.py
 │   ├── core/               RAG pipeline
@@ -246,7 +249,6 @@ ragkit/
 │   │   ├── retriever.py
 │   │   ├── generator.py
 │   │   ├── kb_manager.py
-│   │   ├── deepdoc/        OCR + layout + table parsing (third-party)
 │   │   ├── graph/          Graph RAG (each file = one swap point)
 │   │   │   ├── types.py
 │   │   │   ├── extractor.py   ⇆ swap entity-extraction model/prompt
@@ -259,12 +261,14 @@ ragkit/
 │   │   │   ├── es_indexer.py  graph artifacts → ES
 │   │   │   ├── global_search.py  Map-Reduce pipeline
 │   │   │   └── description_merger.py  LLM description consolidation
-│   │   ├── rag/            tokenizer + search engine (third-party)
-│   │   ├── api/utils/      project base-path helper
-│   │   └── conf/           ES mapping
+│   │   └── _ragflow/       vendored RAGFlow code (third-party)
+│   │       ├── deepdoc/        OCR + layout + table parsing
+│   │       ├── rag/            tokenizer + search engine
+│   │       ├── api/utils/      project base-path helper
+│   │       └── conf/           ES mapping
 │   ├── config.py
 │   └── logger.py
-├── tests/                  ~297 behavior-focused tests
+├── tests/                  452 behavior-focused tests
 ├── docker-compose.yml      Elasticsearch only
 ├── pyproject.toml
 └── .env.example
@@ -275,12 +279,12 @@ Each `⇆`-marked file owns exactly one swap point — change there only:
 
 | To swap... | Edit this | What changes |
 |---|---|---|
-| LLM provider | `generator.py:_client()` + `extractor.py:_llm_client()` + `summarizer.py:_client()` | Point `OpenAI(base_url=…)` at any OpenAI-compatible endpoint |
+| LLM provider | `generator.py:generate()` + `extractor.py:_llm_client()` + `summarizer.py:_client()` | Point `OpenAI(base_url=…)` at any OpenAI-compatible endpoint |
 | Embedding model | `RAG_EMBEDDING_MODEL` / `RAG_EMBEDDING_DIM` env vars | No code change |
 | Vector backend | implement `DocStoreConnection`, change `retriever._get_dealer()` | Drop in Milvus/Qdrant/pgvector |
 | Graph backend | implement `GraphStore`, change `store.open_store()` | Drop in Neo4j/Memgraph |
 | Clustering algorithm | body of `community.detect_communities()` | Swap Louvain → Leiden, Girvan-Newman, etc. |
-| Document parsing | `core/deepdoc/parser/*` | Replace per-format parser |
+| Document parsing | `core/_ragflow/deepdoc/parser/*` | Replace per-format parser |
 
 ## Credits
 
