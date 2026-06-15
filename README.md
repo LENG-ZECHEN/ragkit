@@ -7,8 +7,14 @@
 A minimal **Retrieval-Augmented Generation (RAG)** toolkit with a CLI interface.
 Supports both **vector RAG** and **Graph RAG**.
 
-Extracted and refactored from a larger backend project — the heavy frontend, auth,
-session-management, and HTTP layers are gone; what's left is the RAG pipeline itself.
+Document parsing (OCR, layout, table recognition), tokenization, and the
+BM25 + dense hybrid-retrieval primitives are vendored from
+[RAGFlow](https://github.com/infiniflow/ragflow) (Apache-2.0; see [NOTICE](NOTICE)).
+The original work in this repo is everything around them: the CLI, configuration,
+the indexer / embedder / generator orchestration, the evaluation workflow, the
+DashScope reranker adapter, and the entire **Graph RAG** layer —
+entity/relationship extraction, hierarchical Louvain community detection,
+community-report generation, and the vector / local / global retrieval modes.
 
 ## Features
 

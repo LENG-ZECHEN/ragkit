@@ -19,6 +19,7 @@ from llama_index.core.schema import NodeWithScore
 from llama_index.postprocessor.dashscope_rerank import DashScopeRerank
 
 from ragkit.config import get_config
+from ragkit.logger import logger
 
 
 # DashScope deprecated/restricted gte-rerank v1; default to v2.
@@ -35,7 +36,14 @@ def rerank_scores(query: str, texts: list[str]) -> np.ndarray:
 
     model = os.getenv("RAG_RERANK_MODEL", _DEFAULT_RERANK_MODEL)
 
-    nodes = [NodeWithScore(node=Node(text=t), score=1.0) for t in texts]
+    # Tag each input with its position so scores can be re-aligned by a stable
+    # id, not by text. Aligning by text is wrong: duplicate texts collide (one
+    # overwrites the other), and any non-identical returned string silently
+    # scores 0.0.
+    nodes = [
+        NodeWithScore(node=Node(text=t, metadata={"rerank_id": i}), score=1.0)
+        for i, t in enumerate(texts)
+    ]
     reranker = DashScopeRerank(
         model=model,
         top_n=len(texts),
@@ -43,6 +51,26 @@ def rerank_scores(query: str, texts: list[str]) -> np.ndarray:
     )
     reranked = reranker.postprocess_nodes(nodes, query_str=query)
 
-    # The reranker may return nodes in a different order — we re-align by text content.
-    text_to_score = {n.node.text: n.score for n in reranked}
-    return np.array([text_to_score.get(t, 0.0) for t in texts])
+    # Re-align by rerank_id (input position); the reranker may reorder nodes.
+    scores = np.full(len(texts), np.nan, dtype=float)
+    for nws in reranked:
+        idx = nws.node.metadata.get("rerank_id")
+        if isinstance(idx, int) and 0 <= idx < len(texts) and nws.score is not None:
+            scores[idx] = nws.score
+
+    missing = np.isnan(scores)
+    if missing.any():
+        # Never silently zero a missing score: warn and fall back to the lowest
+        # observed score so an unscored chunk sinks instead of masquerading as a
+        # real 0.0 relevance.
+        observed = scores[~missing]
+        fallback = float(observed.min()) if observed.size else 0.0
+        logger.warning(
+            "Reranker returned no score for %d/%d input(s); falling back to %.4f",
+            int(missing.sum()),
+            len(texts),
+            fallback,
+        )
+        scores[missing] = fallback
+
+    return scores
