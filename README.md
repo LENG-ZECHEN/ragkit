@@ -1,5 +1,8 @@
 # ragkit
 
+[![CI](https://github.com/LENG-ZECHEN/ragkit/actions/workflows/ci.yml/badge.svg)](https://github.com/LENG-ZECHEN/ragkit/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 A minimal **Retrieval-Augmented Generation (RAG)** toolkit with a CLI interface.
 Supports both **vector RAG** and **Graph RAG**.
 
@@ -286,4 +289,4 @@ search engine) directories are extracted and adapted from
 
 ## License
 
-Apache-2.0
+[Apache-2.0](LICENSE). Portions are derived from RAGFlow (Apache-2.0); see [NOTICE](NOTICE) for attribution.

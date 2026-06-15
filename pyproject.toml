@@ -75,6 +75,10 @@ dependencies = [
     "python-louvain>=0.16",
 ]
 
+[project.urls]
+Homepage = "https://github.com/LENG-ZECHEN/ragkit"
+Repository = "https://github.com/LENG-ZECHEN/ragkit"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
