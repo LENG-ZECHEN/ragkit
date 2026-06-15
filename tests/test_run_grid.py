@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,11 @@ from evals.run_grid import (
     run,
 )
 from evals.schema import QAItem, save_dataset
+
+# Matches ANSI SGR escape codes (e.g. "\x1b[1;36m"). rich force-colors help
+# output on CI and styles "--" separately from the option name, splitting the
+# literal "--concurrency" with escape codes; strip them before substring checks.
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 @dataclass
@@ -462,9 +468,12 @@ def test_subprocess_retries_once_before_giving_up(tmp_path):
 @pytest.mark.unit
 def test_cli_help_shows_concurrency_flag():
     runner = CliRunner()
-    result = runner.invoke(app, ["--help"])
+    # Pin a wide width (avoid truncation) and strip ANSI styling before asserting.
+    # On CI rich force-colors the help and splits option names with escape codes,
+    # which breaks a naive substring check; normalizing keeps the test deterministic.
+    result = runner.invoke(app, ["--help"], env={"COLUMNS": "200"})
     assert result.exit_code == 0
-    out = result.stdout
+    out = _ANSI_ESCAPE.sub("", result.stdout)
     assert "--concurrency" in out
     # Defaults are reflected.
     assert str(_CONCURRENCY_DEFAULT) in out
